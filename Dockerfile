@@ -1,36 +1,28 @@
-FROM python:3.10
+FROM python:3.10-slim
 
 WORKDIR /app
 
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --upgrade pip
-RUN pip install -r requirements.txt
-
-# Install spaCy English model for POS features
-RUN python -m spacy download en_core_web_sm
+# Install system dependencies and Python packages
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --upgrade pip \
+    && pip install -r requirements.txt
 
 # Copy all necessary files and directories
 COPY ./src ./src
 COPY ./models ./models
 COPY ./config_main.json .
+COPY ./generate_corrected_json.py .
 COPY ./intelligent_filter.py .
 COPY ./enhanced_metadata_extractor.py .
-COPY ./generate_json_output.py .
-COPY ./enhance_prediction_features.py .
-COPY ./master_pipeline.py .
+COPY ./hierarchical_numbering_analyzer.py .
 
-# Copy main pipeline script to root
-COPY ./src/pipeline.py .
+# Create input and output directories
+RUN mkdir -p /app/input /app/output
 
-# Set environment variables
-ENV MODE=1A
-ENV USE_ML=true
-ENV PYTHONPATH=/app
-
-# Create output directory
-RUN mkdir -p /app/output
-
-CMD ["python", "pipeline.py"]
+# Set the entry point to our automated script
+CMD ["python", "generate_corrected_json.py"]

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-JSON Output Generation Script
-============================
+JSON Output Generation Script - Automated
+=========================================
 
 This script handles generating final JSON output for competition submission.
+Runs automatically without user interaction for Docker deployment.
 
 Features:
-✅ Process PDFs from input or unprocessed_pdfs folders
+✅ Process PDFs from input folder automatically
 ✅ Extract blocks and generate heading predictions
 ✅ Create structured JSON output with heading hierarchy
 ✅ Save JSON files to output folder
@@ -14,20 +15,24 @@ Features:
 ✅ Handle multilingual documents
 ✅ Feature compatibility checking
 ✅ Smart model selection - automatically finds latest retrained model
-✅ Display model information during processing
 ✅ Enhanced model management and status reporting
+✅ Fully automated processing for Docker containers
 
 Model Selection:
-- "latest" automatically selects the most recent retrained model
+- Automatically selects the most recent retrained model
 - Prioritizes retrained models over original trained models
-- Shows model version, file path, and creation time
-- Lists available models for easy selection
+- Shows model version, file path, and creation time during processing
 
 Usage:
     python generate_json_output.py
 
+Docker Usage:
+    The script is designed to run automatically in Docker containers.
+    It will process all PDFs in the /app/input directory and output
+    JSON files to the /app/output directory.
+
 Author: AI Assistant
-Date: July 28, 2025 (Enhanced with smart model selection)
+Date: July 29, 2025 (Enhanced for automated Docker deployment)
 """
 
 import os
@@ -87,14 +92,6 @@ class JSONOutputGenerator:
         self.feature_mismatch = False
         self.expected_feature_names = None
         self.actual_feature_names = None
-        
-        # Initialize intelligent filter for better filtering and title detection
-        try:
-            self.intelligent_filter = IntelligentFilter(config_path=os.path.join(self.base_dir, 'config_main.json'))
-            logger.info("✅ Intelligent filter initialized for enhanced processing")
-        except Exception as e:
-            logger.warning(f"⚠️  Could not initialize intelligent filter: {e}")
-            self.intelligent_filter = None
         
         logger.info("📤 JSON Output Generator initialized!")
         logger.info(f"📁 Input PDFs: {self.input_dir}")
@@ -833,38 +830,107 @@ class JSONOutputGenerator:
         return result_df
     
     def determine_heading_level(self, row, font_percentiles):
-        """Determine heading level (H1/H2/H3) based on font size and position"""
+        """Determine heading level (H1/H2/H3) based on font size, structure, and metadata"""
         font_size = row.get('font_size', 12)
         y_position = row.get('y0', row.get('y_position', 0))
         page_num = row.get('page_num', row.get('page', 1))
+        text = row.get('text', '').strip()
         
         # Get font thresholds
         high_font = font_percentiles.get(90, 16)
         medium_font = font_percentiles.get(75, 14)
+        low_font = font_percentiles.get(60, 12)
         
-        # H1 criteria: largest fonts, top of pages, or first page headings
-        if (font_size >= high_font or 
-            (page_num == 1 and y_position < 200) or
-            font_size >= font_percentiles.get(95, 18)):
+        # Enhanced metadata-based level detection
+        
+        # H1 Level Indicators (Main sections/chapters)
+        h1_patterns = [
+            r'^\s*(?:chapter|part)\s+\d+',  # Chapter 1, Part 1
+            r'^\s*[IVX]+\.\s*[A-Z]',  # I.Introduction, II.Methodology  
+            r'^\s*\d+\.\s*[A-Z][a-z]*(?:\s+[A-Z][a-z]*)*$',  # 1.Introduction, 2.System Architecture
+            r'^\s*(?:introduction|conclusion|summary|abstract|references|bibliography|acknowledgments?|methodology|results|discussion|overview|background)\s*$',
+        ]
+        
+        # H2 Level Indicators (Subsections)
+        h2_patterns = [
+            r'^\s*\d+\.\d+\s+[A-Z]',  # 1.1 Something, 2.3 Another
+            r'^\s*[A-Z]\.\s+[A-Z]',  # A. Something, B. Another
+            r'^\s*\d+\.\d+\.\s*[A-Z][a-z]*(?:\s+[A-Z][a-z]*)*$',  # 1.1.Introduction
+        ]
+        
+        # H3 Level Indicators (Sub-subsections)
+        h3_patterns = [
+            r'^\s*\d+\.\d+\.\d+\s+[A-Z]',  # 1.1.1 Something
+            r'^\s*[a-z][\.)]\s+[A-Z]',  # a) Something, b. Another
+            r'^\s*\([a-z]\)\s+[A-Z]',  # (a) Something
+        ]
+        
+        # Check structural patterns first (highest priority)
+        for pattern in h1_patterns:
+            if re.match(pattern, text, re.IGNORECASE):
+                return "H1"
+                
+        for pattern in h2_patterns:
+            if re.match(pattern, text, re.IGNORECASE):
+                return "H2"
+                
+        for pattern in h3_patterns:
+            if re.match(pattern, text, re.IGNORECASE):
+                return "H3"
+        
+        # Font-based classification with enhanced thresholds
+        if font_size >= high_font:
+            # Large fonts are typically H1
             return "H1"
-        
-        # H2 criteria: medium-large fonts
         elif font_size >= medium_font:
-            return "H2"
-        
-        # H3 criteria: everything else that's a heading
+            # Medium fonts could be H1 or H2 depending on context
+            # If it's at the start of a page or has certain patterns, make it H1
+            if (page_num == 1 and y_position < 300) or font_size >= font_percentiles.get(95, 18):
+                return "H1"
+            else:
+                return "H2"
+        elif font_size >= low_font:
+            # Smaller fonts are typically H2 or H3
+            # Check if it looks like a main section
+            if re.match(r'^\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s*$', text) and len(text.split()) <= 4:
+                return "H2"
+            else:
+                return "H3"
         else:
+            # Very small fonts are H3
             return "H3"
     
     def create_json_structure(self, pdf_name, headings_df, all_blocks_df=None):
-        """Create JSON structure for a PDF with enhanced title detection"""
+        """Create JSON structure for a PDF"""
         
-        # Enhanced title detection using all blocks if available
-        if all_blocks_df is not None and hasattr(self, 'intelligent_filter') and self.intelligent_filter:
-            document_title = self.intelligent_filter.detect_document_title(all_blocks_df)
-        else:
-            # Fallback: try to detect from headings or use filename
-            document_title = self._detect_title_from_headings(headings_df, pdf_name)
+        # Find document title from first H1 in initial 100 blocks
+        document_title = pdf_name.replace('_', ' ').title()  # Default fallback
+        
+        if all_blocks_df is not None:
+            # Look for first H1 heading in initial 100 blocks
+            initial_blocks = all_blocks_df.head(100)
+            initial_headings = initial_blocks[initial_blocks.get('is_heading', 0) == 1]
+            
+            if len(initial_headings) > 0:
+                # Check each heading to see if it's H1 level
+                for _, row in initial_headings.iterrows():
+                    # Use intelligent filter's heading level if available
+                    if 'final_heading_level' in row and row['final_heading_level'] == 'H1':
+                        document_title = str(row['text']).strip()
+                        logger.info(f"📝 Found document title from initial blocks: '{document_title}'")
+                        break
+                    else:
+                        # Determine level using existing logic
+                        font_percentiles = {75: 14, 90: 16, 95: 18}
+                        if 'font_size' in all_blocks_df.columns and len(all_blocks_df) > 0:
+                            for p in [75, 90, 95]:
+                                font_percentiles[p] = all_blocks_df['font_size'].quantile(p / 100.0)
+                        
+                        level = self.determine_heading_level(row, font_percentiles)
+                        if level == 'H1':
+                            document_title = str(row['text']).strip()
+                            logger.info(f"📝 Found document title from initial blocks: '{document_title}'")
+                            break
         
         # Calculate font percentiles for heading level determination (fallback)
         if 'font_size' in headings_df.columns and len(headings_df) > 0:
@@ -927,33 +993,141 @@ class JSONOutputGenerator:
             "outline": outline
         }
         
+        # Apply final consecutive heading merging
+        json_output = self.merge_consecutive_headings_in_outline(json_output)
+        
         return json_output
     
-    def _detect_title_from_headings(self, headings_df, pdf_name):
-        """Fallback method to detect title from headings"""
-        if len(headings_df) == 0:
-            return pdf_name.replace('_', ' ').replace('-', ' ').title()
+    def merge_consecutive_headings_in_outline(self, json_output):
+        """
+        Merge consecutive headings in the final outline where the first heading 
+        matches mergeable patterns (numbers, roman numerals, letters with dots)
+        """
+        if 'outline' not in json_output or not json_output['outline']:
+            return json_output
         
-        # Look for a title-like heading (long, descriptive)
-        for _, row in headings_df.iterrows():
-            text = str(row['text']).strip()
-            word_count = len(text.split())
+        import re
+        
+        # Define mergeable prefix patterns
+        mergeable_patterns = {
+            'numbers': re.compile(r'^\s*\d+\s*$'),                       # "1", "2", etc.
+            'numbered_dots': re.compile(r'^\s*\d+\.\s*$'),               # "1.", "2.", etc.
+            'numbered_multi': re.compile(r'^\s*\d+\.\d+\s*$'),           # "1.1", "2.3", etc.
+            'roman_numerals': re.compile(r'^\s*[IVX]+\s*$', re.IGNORECASE),     # "I", "II", "VII", etc.
+            'roman_numerals_dots': re.compile(r'^\s*[IVX]+\.\s*$', re.IGNORECASE),  # "I.", "VII.", etc.
+            'single_letter': re.compile(r'^\s*[A-Z]\.\s*$'),             # "A.", "B.", etc.
+            'letter_no_dot': re.compile(r'^\s*[A-Z]\s*$'),               # "A", "B", etc.
+        }
+        
+        outline = json_output['outline']
+        merged_outline = []
+        i = 0
+        merged_count = 0
+        
+        logger.info("🔗 Applying final consecutive heading merge to outline...")
+        
+        while i < len(outline):
+            current_entry = outline[i]
+            current_text = current_entry['text'].strip()
             
-            # Skip section markers
-            if re.match(r'^\s*[IVX]+\.|^\s*\d+\.', text):
-                continue
+            # Check if current text matches any mergeable pattern
+            is_mergeable = False
+            pattern_name = ""
+            
+            for name, pattern in mergeable_patterns.items():
+                if pattern.match(current_text):
+                    is_mergeable = True
+                    pattern_name = name
+                    break
+            
+            # If current heading is mergeable and there's a next heading on the same page
+            if (is_mergeable and 
+                i + 1 < len(outline) and
+                outline[i + 1]['page'] == current_entry['page']):
                 
-            # Look for descriptive titles
-            if (word_count >= 5 and 
-                not text.lower() in ['abstract', 'introduction', 'conclusion'] and
-                ('implementation' in text.lower() or 
-                 'platform' in text.lower() or 
-                 'system' in text.lower() or
-                 'practices' in text.lower())):
-                return text
+                next_entry = outline[i + 1]
+                next_text = next_entry['text'].strip()
+                
+                # Additional validation: next text should look like a proper heading continuation
+                if (len(next_text) > 0 and 
+                    next_text[0].isupper() and  # Starts with uppercase
+                    len(next_text.split()) <= 10):  # Not too long
+                    
+                    # Merge the headings
+                    merged_text = f"{current_text} {next_text}".strip()
+                    merged_entry = {
+                        "level": next_entry['level'],  # Use the level of the second heading
+                        "text": merged_text,
+                        "page": current_entry['page']
+                    }
+                    
+                    merged_outline.append(merged_entry)
+                    merged_count += 1
+                    logger.debug(f"Merged outline headings: '{current_text}' + '{next_text}' -> '{merged_text}'")
+                    
+                    # Skip the next entry since we merged it
+                    i += 2
+                    continue
+            
+            # Also check for broken headings (consecutive single words)
+            if (len(current_text.split()) == 1 and 
+                current_text.isalpha() and 
+                current_text[0].isupper() and
+                i + 1 < len(outline) and
+                outline[i + 1]['page'] == current_entry['page']):
+                
+                # Look ahead for more single words to merge
+                words_to_merge = [current_text]
+                entries_to_merge = [current_entry]
+                j = i + 1
+                
+                while (j < len(outline) and 
+                       j < i + 4 and  # Look at most 3 entries ahead
+                       outline[j]['page'] == current_entry['page']):
+                    
+                    next_text = outline[j]['text'].strip()
+                    
+                    # Include single words or short phrases
+                    if (len(next_text.split()) <= 2 and 
+                        next_text.isalpha() and 
+                        next_text[0].isupper()):
+                        words_to_merge.append(next_text)
+                        entries_to_merge.append(outline[j])
+                        j += 1
+                    else:
+                        break
+                
+                # Merge if we have multiple words
+                if len(words_to_merge) >= 2:
+                    merged_text = " ".join(words_to_merge)
+                    
+                    # Validate the merged text looks reasonable
+                    if (len(merged_text) >= 5 and 
+                        len(merged_text.split()) <= 6):
+                        
+                        merged_entry = {
+                            "level": current_entry['level'],
+                            "text": merged_text,
+                            "page": current_entry['page']
+                        }
+                        
+                        merged_outline.append(merged_entry)
+                        merged_count += 1
+                        logger.debug(f"Merged broken heading: {' + '.join(words_to_merge)} -> '{merged_text}'")
+                        
+                        # Skip all merged entries
+                        i = j
+                        continue
+            
+            # No merge needed, add current entry as-is
+            merged_outline.append(current_entry)
+            i += 1
         
-        # Fallback to cleaned filename
-        return pdf_name.replace('_', ' ').replace('-', ' ').title()
+        logger.info(f"✅ Final outline merge completed: {merged_count} merges performed")
+        
+        # Update the JSON output
+        json_output['outline'] = merged_outline
+        return json_output
     
     def validate_json_schema(self, json_data):
         """Validate JSON output against expected schema"""
@@ -1071,17 +1245,42 @@ class JSONOutputGenerator:
                 
                 if len(headings_df) == 0:
                     logger.warning(f"⚠️  No headings detected in {pdf_name}")
-                    # Create minimal JSON with no outline but try to detect title
-                    if self.intelligent_filter:
-                        title = self.intelligent_filter.detect_document_title(df_predictions)
-                    else:
-                        title = pdf_name.replace('_', ' ').title()
+                    # Try to find document title from first H1 in initial blocks anyway
+                    document_title = pdf_name.replace('_', ' ').title()  # Default fallback
+                    
+                    if df_predictions is not None:
+                        # Look for first H1 heading in initial 100 blocks
+                        initial_blocks = df_predictions.head(100)
+                        initial_headings = initial_blocks[initial_blocks.get('is_heading', 0) == 1]
+                        
+                        if len(initial_headings) > 0:
+                            # Check each heading to see if it's H1 level
+                            for _, row in initial_headings.iterrows():
+                                # Use intelligent filter's heading level if available
+                                if 'final_heading_level' in row and row['final_heading_level'] == 'H1':
+                                    document_title = str(row['text']).strip()
+                                    logger.info(f"📝 Found document title from initial blocks: '{document_title}'")
+                                    break
+                                else:
+                                    # Determine level using existing logic
+                                    font_percentiles = {75: 14, 90: 16, 95: 18}
+                                    if 'font_size' in df_predictions.columns and len(df_predictions) > 0:
+                                        for p in [75, 90, 95]:
+                                            font_percentiles[p] = df_predictions['font_size'].quantile(p / 100.0)
+                                    
+                                    level = self.determine_heading_level(row, font_percentiles)
+                                    if level == 'H1':
+                                        document_title = str(row['text']).strip()
+                                        logger.info(f"📝 Found document title from initial blocks: '{document_title}'")
+                                        break
+                    
+                    # Create minimal JSON with no outline
                     json_output = {
-                        "title": title,
+                        "title": document_title,
                         "outline": []
                     }
                 else:
-                    # Create JSON structure with all blocks data for better title detection
+                    # Create JSON structure
                     json_output = self.create_json_structure(pdf_name, headings_df, df_predictions)
                 
                 # Validate JSON schema
@@ -1153,126 +1352,58 @@ class JSONOutputGenerator:
             if len(model_files) > 5:
                 print(f"      ... and {len(model_files)-5} more models")
     
-    def interactive_menu(self):
-        """Interactive menu for JSON generation operations"""
-        while True:
-            print("\n" + "="*60)
-            print("📤 JSON OUTPUT GENERATION SCRIPT")
-            print("="*60)
-            print("1. 📤 Load model")
-            print("2. 📥 Generate JSON from input PDFs")
-            print("3. 📄 Generate JSON from unprocessed PDFs")
-            print("4. 📊 Show status")
-            print("5. 🧹 Clean output directory")
-            print("6. ❌ Exit")
-            print()
-            
-            choice = input("Choose an option (1-6): ").strip()
-            
-            if choice == '1':
-                # Show available models first
-                model_files = glob.glob(os.path.join(self.models_dir, "heading_model_*.pkl"))
-                if model_files:
-                    print("\n📋 Available models:")
-                    model_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-                    for i, model_file in enumerate(model_files[:10]):  # Show top 10
-                        filename = os.path.basename(model_file)
-                        version = filename.replace("heading_model_", "").replace(".pkl", "")
-                        mod_time = datetime.fromtimestamp(os.path.getmtime(model_file))
-                        
-                        # Highlight retrained models
-                        prefix = "🔄" if "retrained" in version else "🤖"
-                        print(f"   {i+1}. {prefix} {version} ({mod_time.strftime('%Y-%m-%d %H:%M')})")
-                    
-                    if len(model_files) > 10:
-                        print(f"   ... and {len(model_files)-10} more models")
-                else:
-                    print("\n⚠️  No models found in models directory!")
-                
-                print("\n💡 Options:")
-                print("   - Type 'latest' (recommended) - automatically selects most recent retrained model")
-                print("   - Type specific version name (e.g., 'retrained_cycle_2_20250728_103027')")
-                print("   - Press Enter for 'latest'")
-                
-                version = input("\nModel version: ").strip()
-                if not version:
-                    version = "latest"
-                
-                if self.load_model(version):
-                    print("✅ Model loaded successfully!")
-                    if self.check_feature_compatibility():
-                        print("✅ Feature compatibility check passed!")
-                    else:
-                        print("❌ Feature compatibility check failed!")
-                else:
-                    print("❌ Failed to load model!")
-            
-            elif choice == '2':
-                if self.model is None:
-                    print("❌ No model loaded. Please load a model first.")
-                    continue
-                
-                success = self.generate_json_output("input")
-                if success:
-                    print("✅ JSON generation completed successfully!")
-                else:
-                    print("❌ JSON generation failed!")
-            
-            elif choice == '3':
-                if self.model is None:
-                    print("❌ No model loaded. Please load a model first.")
-                    continue
-                
-                success = self.generate_json_output("unprocessed")
-                if success:
-                    print("✅ JSON generation completed successfully!")
-                else:
-                    print("❌ JSON generation failed!")
-            
-            elif choice == '4':
-                self.show_status()
-            
-            elif choice == '5':
-                confirm = input("Delete all JSON output files? (y/N): ").strip().lower()
-                if confirm == 'y':
-                    import shutil
-                    if os.path.exists(self.output_dir):
-                        shutil.rmtree(self.output_dir)
-                        os.makedirs(self.output_dir)
-                        print("✅ Cleaned output directory")
-                else:
-                    print("❌ Cleanup cancelled")
-            
-            elif choice == '6':
-                print("👋 Goodbye!")
-                break
-            
-            else:
-                print("❌ Invalid choice. Please try again.")
-
-
+    
 def main():
-    """Main function"""
+    """Main function - Automated processing"""
     print("📤 JSON OUTPUT GENERATION SCRIPT")
     print("=" * 50)
     print("🎯 Features:")
-    print("   ✅ Process PDFs from input or unprocessed folders")
+    print("   ✅ Process PDFs from input folder")
     print("   ✅ Extract blocks and generate heading predictions")
     print("   ✅ Create structured JSON output with hierarchy")
     print("   ✅ Save JSON files to output folder")
     print("   ✅ Validate JSON schema compliance")
     print("   ✅ Handle multilingual documents")
     print("   ✅ Feature compatibility checking")
+    print("   ✅ Automatic model loading and processing")
     print()
     
     try:
+        # Initialize generator
         generator = JSONOutputGenerator()
-        generator.interactive_menu()
+        
+        # Automatically load the latest model
+        logger.info("🤖 Loading the latest model...")
+        if not generator.load_model("latest"):
+            logger.error("❌ Failed to load model!")
+            return False
+        
+        logger.info("✅ Model loaded successfully!")
+        
+        # Check feature compatibility
+        if not generator.check_feature_compatibility():
+            logger.error("❌ Feature compatibility check failed!")
+            return False
+        
+        logger.info("✅ Feature compatibility check passed!")
+        
+        # Automatically process PDFs from input folder
+        logger.info("📄 Starting automatic processing of input PDFs...")
+        success = generator.generate_json_output("input")
+        
+        if success:
+            logger.info("✅ JSON generation completed successfully!")
+            return True
+        else:
+            logger.error("❌ JSON generation failed!")
+            return False
+            
     except KeyboardInterrupt:
         print("\n👋 Generation interrupted by user")
+        return False
     except Exception as e:
         logger.error(f"❌ Generation error: {e}")
-        raise
+        return False
 
 
 if __name__ == "__main__":
