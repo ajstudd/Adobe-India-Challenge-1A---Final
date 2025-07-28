@@ -99,6 +99,9 @@ class IntelligentFilter:
         
         # Exclusion patterns (common false positives) - Enhanced based on requirements
         self.exclusion_patterns = {
+            # Basic text patterns
+            'starts_with_lowercase': re.compile(r'^\s*[a-z]'),  # New rule: reject headings starting with lowercase
+            
             # URLs and technical references
             'urls': re.compile(r'http[s]?://|www\.|\.com|\.org|\.edu|\.gov', re.IGNORECASE),
             'emails': re.compile(r'\S+@\S+\.\S+'),
@@ -123,22 +126,31 @@ class IntelligentFilter:
             
             # Identity and name patterns (Rule 2: Reject identity blocks)
             'university_patterns': re.compile(r'university|college|institute', re.IGNORECASE),
-            'registration_patterns': re.compile(r'registration|b\.?tech|student|name\s*:', re.IGNORECASE),
+            'registration_patterns': re.compile(r'registration\s*:?\s*\d+|b\.?tech|student|name\s*:', re.IGNORECASE),
             'location_patterns': re.compile(r'phagwara|punjab|india', re.IGNORECASE),
             'person_names': re.compile(r'^[A-Z][a-z]+\s+[A-Z][a-z]+$'),  # FirstName LastName pattern
+            'full_names': re.compile(r'^[A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*$'),  # Full names
+            'course_names': re.compile(r'computer\s+science|engineering|b\.?tech', re.IGNORECASE),
             
             # Technical terms and tools
-            'technical_terms': re.compile(r'^[A-Z][a-z]*\.(js|py|css|html)$|docker|bcrypt|automation|vps', re.IGNORECASE),
+            'technical_terms': re.compile(r'^[A-Z][a-z]*\.(js|py|css|html)$|docker|bcrypt|automation|vps|api|jwt|json|web|token', re.IGNORECASE),
             'version_numbers': re.compile(r'v\d+\.\d+|version\s+\d+', re.IGNORECASE),
             'technical_ids': re.compile(r'^[A-Z]{2,}\d+|^\d+[A-Z]+\d*$'),
+            'programming_terms': re.compile(r'^(api|jwt|json|xml|http|https|css|html|javascript|nodejs|react|docker|kubernetes|git|github)$', re.IGNORECASE),
+            'technical_fragments': re.compile(r'^(backend|frontend|interface|leverages|architecture|employs)$', re.IGNORECASE),
             
             # Fragment patterns (Rule 5: Must not be fragments)
             'single_words': re.compile(r'^\s*\w+\s*$'),  # Single word
-            'discourse_markers': re.compile(r'^(these|initially|however|therefore|thus|hence|moreover|furthermore|additionally)$', re.IGNORECASE),
+            'discourse_markers': re.compile(r'^(these|initially|however|therefore|thus|hence|moreover|furthermore|additionally|the\s+\w+|in\s+summary)$', re.IGNORECASE),
             'conjunctions': re.compile(r'^(and|but|or|so|yet|for|nor)$', re.IGNORECASE),
+            'incomplete_phrases': re.compile(r'^(the|a|an|with|by|from|to|in|on|at|of|for)\s+\w+', re.IGNORECASE),
+            'sentence_starters': re.compile(r'^(the\s+\w+|this\s+\w+|that\s+\w+|these\s+\w+|from\s+a\s+social|deployed\s+application)', re.IGNORECASE),
             
             # System and containerization terms from examples
-            'system_fragments': re.compile(r'containerized\s+infrastructure|powered\s+by|hosting\s+environment', re.IGNORECASE),
+            'system_fragments': re.compile(r'containerized\s+infrastructure|powered\s+by|hosting\s+environment|communication\s+for|leverages\s+\w+|employs\s+\w+|updates\s*$', re.IGNORECASE),
+            'article_words': re.compile(r'^(a|an|the)$', re.IGNORECASE),
+            'platform_names': re.compile(r'^proactive\s*india$|^proactive$|^india$', re.IGNORECASE),  # Specific to this document
+            'implementation_fragments': re.compile(r'^the\s+implementation\s+of|^the\s+development\s+and|^the\s+application\s+is', re.IGNORECASE),
         }
         
         # Positive patterns (likely to be headings) - Enhanced

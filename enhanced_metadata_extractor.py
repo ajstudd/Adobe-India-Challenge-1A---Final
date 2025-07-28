@@ -359,6 +359,13 @@ class EnhancedMetadataExtractor:
         df['context_score'] = 0
         df['position_patterns'] = ''
         
+        # Handle missing page column
+        if 'page' not in df.columns:
+            if 'page_num' in df.columns:
+                df['page'] = df['page_num']
+            else:
+                df['page'] = 1  # Default to page 1 if no page info
+        
         for page in df['page'].unique():
             page_df = df[df['page'] == page].copy()
             
