@@ -1,0 +1,59 @@
+{
+  "pipeline_settings": {
+    "model_type": "random_forest",
+    "training_mode": "fast",
+    "confidence_threshold": 0.6,
+    "min_heading_percentage": 1.0
+  },
+  
+  "model_params": {
+    "n_estimators": 100,
+    "max_depth": 15,
+    "min_samples_split": 5,
+    "min_samples_leaf": 2,
+    "class_weight": {"0": 1, "1": 8}
+  },
+  
+  "smote_params": {
+    "sampling_strategy": 0.3,
+    "random_state": 42
+  },
+  
+  "tfidf_params": {
+    "max_features": 30,
+    "ngram_range": [1, 2],
+    "min_df": 3,
+    "max_df": 0.7,
+    "stop_words": "english"
+  },
+  
+  "feature_engineering": {
+    "font_percentiles": [90, 75, 50],
+    "position_features": true,
+    "advanced_text_features": false,
+    "dynamic_thresholding": false
+  },
+  
+  "training": {
+    "test_size": 0.25,
+    "cv_folds": 3,
+    "stratified": true,
+    "threshold_optimization": false
+  },
+  
+  "directories": {
+    "labelled_data": "labelled_data",
+    "unprocessed_pdfs": "unprocessed_pdfs",
+    "input": "input",
+    "output": "output",
+    "models": "models",
+    "predictions": "predictions",
+    "reviewed": "reviewed"
+  },
+  
+  "extraction_settings": {
+    "min_text_length": 5,
+    "font_percentiles": [90, 75, 50],
+    "enable_fallback": true
+  }
+}

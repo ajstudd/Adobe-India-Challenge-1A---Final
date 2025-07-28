@@ -1,0 +1,67 @@
+{
+  "pipeline_settings": {
+    "model_type": "random_forest",
+    "training_mode": "high_accuracy",
+    "confidence_threshold": 0.45,
+    "min_heading_percentage": 0.1
+  },
+  
+  "model_params": {
+    "n_estimators": 1000,
+    "max_depth": 30,
+    "min_samples_split": 2,
+    "min_samples_leaf": 1,
+    "class_weight": {"0": 1, "1": 15},
+    "max_features": "sqrt",
+    "bootstrap": true
+  },
+  
+  "smote_params": {
+    "sampling_strategy": 0.5,
+    "random_state": 42,
+    "k_neighbors": 5
+  },
+  
+  "tfidf_params": {
+    "max_features": 500,
+    "ngram_range": [1, 3],
+    "min_df": 1,
+    "max_df": 0.95,
+    "stop_words": "english",
+    "analyzer": "word",
+    "lowercase": true
+  },
+  
+  "feature_engineering": {
+    "font_percentiles": [95, 90, 85, 80, 75, 70, 65, 60, 55, 50, 45, 40, 35, 30, 25],
+    "position_features": true,
+    "advanced_text_features": true,
+    "dynamic_thresholding": true,
+    "cross_validation": true
+  },
+  
+  "training": {
+    "test_size": 0.15,
+    "cv_folds": 5,
+    "stratified": true,
+    "threshold_optimization": true,
+    "feature_selection": true
+  },
+  
+  "directories": {
+    "labelled_data": "labelled_data",
+    "unprocessed_pdfs": "unprocessed_pdfs",
+    "input": "input",
+    "output": "output",
+    "models": "models",
+    "predictions": "predictions",
+    "reviewed": "reviewed"
+  },
+  
+  "extraction_settings": {
+    "min_text_length": 1,
+    "font_percentiles": [95, 90, 85, 80, 75, 70, 65, 60, 55, 50, 45, 40, 35, 30, 25],
+    "enable_fallback": true,
+    "advanced_preprocessing": true
+  }
+}

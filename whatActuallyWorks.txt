@@ -1,2 +1,0 @@
-use your old master_pipeline
-otherwise go for precision_focused_trainer adn precision_json_generator

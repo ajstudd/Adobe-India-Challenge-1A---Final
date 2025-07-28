@@ -1,0 +1,475 @@
+{
+  "timestamp": "20250727_110204",
+  "dataset_info": {
+    "total_files": 13,
+    "quality_files": 12,
+    "total_samples": 22800,
+    "total_headings": 771,
+    "heading_percentage": 3.381578947368421,
+    "file_breakdown": [
+      {
+        "filename": "Hindi User Manual 1_blocks.csv",
+        "samples": 227,
+        "headings": 24,
+        "percentage": 10.572687224669604
+      },
+      {
+        "filename": "INT252ProjectReportJunaid_blocks.csv",
+        "samples": 307,
+        "headings": 26,
+        "percentage": 8.469055374592834
+      },
+      {
+        "filename": "Japanese Research Paper_blocks.csv",
+        "samples": 4800,
+        "headings": 44,
+        "percentage": 0.9166666666666666
+      },
+      {
+        "filename": "NCERT Science Chap 9_blocks.csv",
+        "samples": 2271,
+        "headings": 60,
+        "percentage": 2.642007926023778
+      },
+      {
+        "filename": "Numbers and Bullet Points 2_blocks.csv",
+        "samples": 2410,
+        "headings": 127,
+        "percentage": 5.269709543568465
+      },
+      {
+        "filename": "Numbers and Bullet Points 3_blocks.csv",
+        "samples": 2688,
+        "headings": 40,
+        "percentage": 1.488095238095238
+      },
+      {
+        "filename": "OnePlus_5_User_Manual_blocks.csv",
+        "samples": 810,
+        "headings": 47,
+        "percentage": 5.802469135802469
+      },
+      {
+        "filename": "Patent 2_blocks.csv",
+        "samples": 1448,
+        "headings": 23,
+        "percentage": 1.5883977900552488
+      },
+      {
+        "filename": "Patent law_blocks.csv",
+        "samples": 1072,
+        "headings": 61,
+        "percentage": 5.690298507462686
+      },
+      {
+        "filename": "patent_blocks.csv",
+        "samples": 1532,
+        "headings": 86,
+        "percentage": 5.613577023498695
+      },
+      {
+        "filename": "Research Paper 3_blocks.csv",
+        "samples": 1216,
+        "headings": 13,
+        "percentage": 1.069078947368421
+      },
+      {
+        "filename": "Research Paper 4_blocks.csv",
+        "samples": 3243,
+        "headings": 165,
+        "percentage": 5.087881591119333
+      },
+      {
+        "filename": "Research Paper 5_blocks.csv",
+        "samples": 776,
+        "headings": 55,
+        "percentage": 7.087628865979381
+      }
+    ]
+  },
+  "model_info": {
+    "model_type": "RandomForestClassifier",
+    "n_estimators": 500,
+    "max_depth": 25,
+    "class_weight": {
+      "0": 1,
+      "1": 20
+    },
+    "n_features": 20,
+    "feature_names": [
+      "text_length",
+      "word_count",
+      "is_numeric",
+      "is_upper",
+      "is_title",
+      "starts_with_number",
+      "has_punctuation",
+      "font_size",
+      "font_ge_25p",
+      "font_ge_50p",
+      "font_ge_75p",
+      "font_ge_90p",
+      "font_ge_95p",
+      "x",
+      "y",
+      "width",
+      "height",
+      "center_x",
+      "center_y",
+      "page"
+    ]
+  },
+  "training_results": {
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1_score": 1.0,
+    "predicted_headings": 582,
+    "actual_headings": 582,
+    "total_samples": 14400,
+    "roc_auc": 1.0,
+    "avg_precision": 1.0
+  },
+  "test_results": {
+    "accuracy": 0.9886111111111111,
+    "precision": 0.9333333333333333,
+    "recall": 0.7724137931034483,
+    "f1_score": 0.8452830188679246,
+    "predicted_headings": 120,
+    "actual_headings": 145,
+    "total_samples": 3600,
+    "roc_auc": 0.986587155047657,
+    "avg_precision": 0.9373015540872851
+  },
+  "cross_validation": {
+    "accuracy_mean": 0.9877222222222223,
+    "accuracy_std": 0.0021037884698623627,
+    "f1_mean": 0.8296881797416058,
+    "f1_std": 0.02846503092182017,
+    "precision_mean": 0.9442435308983204,
+    "precision_std": 0.03428697245960827,
+    "recall_mean": 0.7400944733112895,
+    "recall_std": 0.02665377257601587,
+    "all_scores": {
+      "accuracy": [
+        0.9902777777777778,
+        0.9877777777777778,
+        0.9897222222222222,
+        0.9861111111111112,
+        0.9847222222222223
+      ],
+      "f1": [
+        0.8648648648648649,
+        0.8267716535433071,
+        0.8582375478927203,
+        0.8076923076923077,
+        0.7908745247148289
+      ],
+      "precision": [
+        0.9824561403508771,
+        0.963302752293578,
+        0.9655172413793104,
+        0.9210526315789473,
+        0.8888888888888888
+      ],
+      "recall": [
+        0.7724137931034483,
+        0.7241379310344828,
+        0.7724137931034483,
+        0.7191780821917808,
+        0.7123287671232876
+      ]
+    }
+  },
+  "detailed_metrics": {
+    "confusion_matrix": [
+      [
+        3447,
+        8
+      ],
+      [
+        33,
+        112
+      ]
+    ],
+    "classification_report": {
+      "Not Heading": {
+        "precision": 0.9905172413793103,
+        "recall": 0.997684515195369,
+        "f1-score": 0.9940879596250901,
+        "support": 3455.0
+      },
+      "Heading": {
+        "precision": 0.9333333333333333,
+        "recall": 0.7724137931034483,
+        "f1-score": 0.8452830188679246,
+        "support": 145.0
+      },
+      "accuracy": 0.9886111111111111,
+      "macro avg": {
+        "precision": 0.9619252873563218,
+        "recall": 0.8850491541494087,
+        "f1-score": 0.9196854892465074,
+        "support": 3600.0
+      },
+      "weighted avg": {
+        "precision": 0.9882140006385697,
+        "recall": 0.9886111111111111,
+        "f1-score": 0.9880944272890375,
+        "support": 3600.0
+      }
+    }
+  },
+  "feature_importance": {
+    "top_features": [
+      {
+        "feature": "height",
+        "importance": 0.15620031729223843
+      },
+      {
+        "feature": "center_x",
+        "importance": 0.13322429318555654
+      },
+      {
+        "feature": "font_size",
+        "importance": 0.11458143723684676
+      },
+      {
+        "feature": "width",
+        "importance": 0.09137795287759742
+      },
+      {
+        "feature": "x",
+        "importance": 0.07384749006521069
+      },
+      {
+        "feature": "text_length",
+        "importance": 0.05672988527227506
+      },
+      {
+        "feature": "is_upper",
+        "importance": 0.05116359599111428
+      },
+      {
+        "feature": "y",
+        "importance": 0.037224350463144346
+      },
+      {
+        "feature": "word_count",
+        "importance": 0.03710300482659569
+      },
+      {
+        "feature": "is_title",
+        "importance": 0.03580618002298672
+      }
+    ],
+    "all_features": [
+      {
+        "feature": "text_length",
+        "importance": 0.05672988527227506
+      },
+      {
+        "feature": "word_count",
+        "importance": 0.03710300482659569
+      },
+      {
+        "feature": "is_numeric",
+        "importance": 0.025909261297771324
+      },
+      {
+        "feature": "is_upper",
+        "importance": 0.05116359599111428
+      },
+      {
+        "feature": "is_title",
+        "importance": 0.03580618002298672
+      },
+      {
+        "feature": "starts_with_number",
+        "importance": 0.014872643434814222
+      },
+      {
+        "feature": "has_punctuation",
+        "importance": 0.01633012898373618
+      },
+      {
+        "feature": "font_size",
+        "importance": 0.11458143723684676
+      },
+      {
+        "feature": "font_ge_25p",
+        "importance": 0.005840549333064487
+      },
+      {
+        "feature": "font_ge_50p",
+        "importance": 0.008170956460483821
+      },
+      {
+        "feature": "font_ge_75p",
+        "importance": 0.02379645191349314
+      },
+      {
+        "feature": "font_ge_90p",
+        "importance": 0.02528704010845597
+      },
+      {
+        "feature": "font_ge_95p",
+        "importance": 0.02279028387480834
+      },
+      {
+        "feature": "x",
+        "importance": 0.07384749006521069
+      },
+      {
+        "feature": "y",
+        "importance": 0.037224350463144346
+      },
+      {
+        "feature": "width",
+        "importance": 0.09137795287759742
+      },
+      {
+        "feature": "height",
+        "importance": 0.15620031729223843
+      },
+      {
+        "feature": "center_x",
+        "importance": 0.13322429318555654
+      },
+      {
+        "feature": "center_y",
+        "importance": 0.034277001841597654
+      },
+      {
+        "feature": "page",
+        "importance": 0.03546717551820902
+      }
+    ]
+  },
+  "threshold_analysis": {
+    "best_threshold": 0.3500000000000001,
+    "best_f1_score": 0.8972602739726028,
+    "all_thresholds": [
+      {
+        "threshold": 0.1,
+        "precision": 0.6730769230769231,
+        "recall": 0.9655172413793104,
+        "f1_score": 0.7932011331444759,
+        "predicted_count": 208
+      },
+      {
+        "threshold": 0.15000000000000002,
+        "precision": 0.7419354838709677,
+        "recall": 0.9517241379310345,
+        "f1_score": 0.8338368580060423,
+        "predicted_count": 186
+      },
+      {
+        "threshold": 0.20000000000000004,
+        "precision": 0.7953216374269005,
+        "recall": 0.9379310344827586,
+        "f1_score": 0.8607594936708861,
+        "predicted_count": 171
+      },
+      {
+        "threshold": 0.25000000000000006,
+        "precision": 0.8333333333333334,
+        "recall": 0.9310344827586207,
+        "f1_score": 0.8794788273615635,
+        "predicted_count": 162
+      },
+      {
+        "threshold": 0.30000000000000004,
+        "precision": 0.869281045751634,
+        "recall": 0.9172413793103448,
+        "f1_score": 0.8926174496644296,
+        "predicted_count": 153
+      },
+      {
+        "threshold": 0.3500000000000001,
+        "precision": 0.891156462585034,
+        "recall": 0.903448275862069,
+        "f1_score": 0.8972602739726028,
+        "predicted_count": 147
+      },
+      {
+        "threshold": 0.40000000000000013,
+        "precision": 0.9111111111111111,
+        "recall": 0.8482758620689655,
+        "f1_score": 0.8785714285714286,
+        "predicted_count": 135
+      },
+      {
+        "threshold": 0.45000000000000007,
+        "precision": 0.9212598425196851,
+        "recall": 0.8068965517241379,
+        "f1_score": 0.8602941176470589,
+        "predicted_count": 127
+      },
+      {
+        "threshold": 0.5000000000000001,
+        "precision": 0.9333333333333333,
+        "recall": 0.7724137931034483,
+        "f1_score": 0.8452830188679246,
+        "predicted_count": 120
+      },
+      {
+        "threshold": 0.5500000000000002,
+        "precision": 0.9375,
+        "recall": 0.7241379310344828,
+        "f1_score": 0.8171206225680934,
+        "predicted_count": 112
+      },
+      {
+        "threshold": 0.6000000000000002,
+        "precision": 0.9607843137254902,
+        "recall": 0.6758620689655173,
+        "f1_score": 0.7935222672064778,
+        "predicted_count": 102
+      },
+      {
+        "threshold": 0.6500000000000001,
+        "precision": 0.9583333333333334,
+        "recall": 0.6344827586206897,
+        "f1_score": 0.7634854771784232,
+        "predicted_count": 96
+      },
+      {
+        "threshold": 0.7000000000000002,
+        "precision": 0.9545454545454546,
+        "recall": 0.5793103448275863,
+        "f1_score": 0.721030042918455,
+        "predicted_count": 88
+      },
+      {
+        "threshold": 0.7500000000000002,
+        "precision": 0.961038961038961,
+        "recall": 0.5103448275862069,
+        "f1_score": 0.6666666666666666,
+        "predicted_count": 77
+      },
+      {
+        "threshold": 0.8000000000000002,
+        "precision": 0.9846153846153847,
+        "recall": 0.4413793103448276,
+        "f1_score": 0.6095238095238096,
+        "predicted_count": 65
+      },
+      {
+        "threshold": 0.8500000000000002,
+        "precision": 1.0,
+        "recall": 0.4,
+        "f1_score": 0.5714285714285714,
+        "predicted_count": 58
+      }
+    ]
+  },
+  "recommendations": [
+    "✅ Good performance: Model ready for production"
+  ],
+  "summary": {
+    "model_ready_for_production": true,
+    "data_quality_score": 56.6157894736842,
+    "overall_performance_score": 88.07534880358563
+  }
+}

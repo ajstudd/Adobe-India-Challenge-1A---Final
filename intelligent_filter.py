@@ -109,7 +109,6 @@ class IntelligentFilter:
             'page_numbers': re.compile(r'^\s*(?:page\s+)?\d+\s*$', re.IGNORECASE),
             'registration_numbers': re.compile(r'registration\s*:?\s*\d+', re.IGNORECASE),
             'student_ids': re.compile(r'^\s*\d{6,12}\s*$'),  # Long numeric IDs
-            'bare_numbers': re.compile(r'^\s*\d+\s*$'),  # Just numbers
             
             # Document structure elements
             'footers': re.compile(r'^\s*(?:page\s+\d+|copyright|©|\d+\s*$)', re.IGNORECASE),
@@ -123,50 +122,35 @@ class IntelligentFilter:
             'question_sentences': re.compile(r'^.{20,}\?\s*$'),  # Questions are rarely headings
             
             # Identity and name patterns (Rule 2: Reject identity blocks)
-            'university_patterns': re.compile(r'lovely\s+professional\s+university|university|college|institute', re.IGNORECASE),
-            'registration_patterns': re.compile(r'registration|b\.?tech|student|name\s*:|regn\s+no\s*:|course\s+code', re.IGNORECASE),
+            'university_patterns': re.compile(r'university|college|institute', re.IGNORECASE),
+            'registration_patterns': re.compile(r'registration|b\.?tech|student|name\s*:', re.IGNORECASE),
             'location_patterns': re.compile(r'phagwara|punjab|india', re.IGNORECASE),
-            'person_names': re.compile(r'^[A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*$'),  # Names pattern
-            'academic_info': re.compile(r'^(dr\.|prof\.|mr\.|ms\.|mrs\.)|submitted\s+(by|to)|school\s+of', re.IGNORECASE),
+            'person_names': re.compile(r'^[A-Z][a-z]+\s+[A-Z][a-z]+$'),  # FirstName LastName pattern
             
             # Technical terms and tools
-            'technical_terms': re.compile(r'^[A-Z][a-z]*\.(js|py|css|html)$|bcrypt|automation|vps', re.IGNORECASE),
+            'technical_terms': re.compile(r'^[A-Z][a-z]*\.(js|py|css|html)$|docker|bcrypt|automation|vps', re.IGNORECASE),
             'version_numbers': re.compile(r'v\d+\.\d+|version\s+\d+', re.IGNORECASE),
             'technical_ids': re.compile(r'^[A-Z]{2,}\d+|^\d+[A-Z]+\d*$'),
-            'docker_patterns': re.compile(r'docker\s+hub|containerized|powered\s+by|hosting\s+environment', re.IGNORECASE),
             
             # Fragment patterns (Rule 5: Must not be fragments)
             'single_words': re.compile(r'^\s*\w+\s*$'),  # Single word
-            'discourse_markers': re.compile(r'^(these|initially|however|therefore|thus|hence|moreover|furthermore|additionally|for)$', re.IGNORECASE),
+            'discourse_markers': re.compile(r'^(these|initially|however|therefore|thus|hence|moreover|furthermore|additionally)$', re.IGNORECASE),
             'conjunctions': re.compile(r'^(and|but|or|so|yet|for|nor)$', re.IGNORECASE),
-            'prepositions': re.compile(r'^(in|on|at|to|from|with|by|of|about|through|during)$', re.IGNORECASE),
             
             # System and containerization terms from examples
-            'system_fragments': re.compile(r'containerized\s+infrastructure|powered\s+by|hosting\s+environment|component\s+architecture\s+leverage', re.IGNORECASE),
-            
-            # Course and academic metadata
-            'course_metadata': re.compile(r'^(int|cse|ece|mca|bca)\s+\d+$|project\s+(term|report)$|august\s*-\s*november', re.IGNORECASE),
-            
-            # Repository and technical service names
-            'service_names': re.compile(r'github\s*-|docker\s+hub\s*-|frontend\s+service|backend\s+repository|api\s+gateway|authentication\s+service|platform\s+service', re.IGNORECASE),
-            
-            # URLs that look like headings
-            'url_like': re.compile(r'(frontend|backend|proactive|auth-service|api-gateway)', re.IGNORECASE),
+            'system_fragments': re.compile(r'containerized\s+infrastructure|powered\s+by|hosting\s+environment', re.IGNORECASE),
         }
         
         # Positive patterns (likely to be headings) - Enhanced
         self.positive_patterns = {
-            'roman_numerals': re.compile(r'^\s*[IVX]+\.\s+[A-Z]', re.IGNORECASE),  # I. Something, II. Something
-            'numbered_sections': re.compile(r'^\s*\d+\.\s+[A-Z]'),  # 1. Something (capital start)
-            'subsection_numbers': re.compile(r'^\s*\d+\.\d+\s+[A-Z]'),  # 1.1 Something
-            'letter_headings': re.compile(r'^\s*[A-Z]\.\s+[A-Z]'),  # A. Something
-            'sub_letter_headings': re.compile(r'^\s*[A-Z]\.\d+\s+[A-Z]'),  # A.1 Something, C.1 Something
             'chapter_section': re.compile(r'^\s*(?:chapter|section|part|unit|lesson)\s+\d+', re.IGNORECASE),
             'appendix': re.compile(r'^\s*appendix\s+[a-z]\b', re.IGNORECASE),
-            'common_headings': re.compile(r'^\s*(?:abstract|introduction|conclusion|summary|references|bibliography|acknowledgments?|methodology|results|discussion|analysis|overview|background|objectives?|scope|limitations?|recommendations?|findings|implementation|outcomes?|project\s+(?:plan|legacy|resources)|problem\s+analysis|feasibility\s+analysis|system\s+architecture|devops\s+workflow|deployment\s+strategy)\s*$', re.IGNORECASE),
+            'common_headings': re.compile(r'^\s*(?:introduction|conclusion|summary|abstract|references|bibliography|acknowledgments?|methodology|results|discussion|analysis|overview|background|objectives?|scope|limitations?|recommendations?|findings)\s*$', re.IGNORECASE),
+            'numbered_headings': re.compile(r'^\s*\d+(?:\.\d+)*\s+[A-Z]'),  # 1.1 Something (capital start)
             'title_case_short': re.compile(r'^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,6}$'),  # Title Case (short)
+            'roman_numerals': re.compile(r'^\s*[IVX]+\.\s+[A-Z]', re.IGNORECASE),  # I. Something
+            'letter_headings': re.compile(r'^\s*[A-Z]\.\s+[A-Z]'),  # A. Something
             'starts_with_capital_number': re.compile(r'^[A-Z0-9]'),  # Rule 4: Must start with capital or number
-            'heading_keywords': re.compile(r'\b(?:architecture|implementation|development|integration|deployment|infrastructure|microservices|continuous|workflow|platform|strategy|analysis|definition|feasibility)\b', re.IGNORECASE),
         }
         
         # Common heading words for fragment detection
@@ -252,131 +236,85 @@ class IntelligentFilter:
         char_count = len(text_clean)
         rejection_reasons = []
         
-        # Fast exclusion check first
-        is_excluded, exclusion_reason = self.check_exclusion_patterns(text_clean)
-        if is_excluded:
-            rejection_reasons.append(f"exclusion_pattern_{exclusion_reason}")
-            return True, rejection_reasons
-        
         # Rule 1: Reject sentence-like structures
-        if text_clean.endswith('.') and word_count > 3:
-            rejection_reasons.append("sentence_with_period")
+        if text_clean.endswith('.'):
+            rejection_reasons.append("ends_with_period")
         
-        if word_count > 15:  # Increased threshold for academic headings
+        if word_count > 12:
             rejection_reasons.append("too_many_words")
             
-        if char_count > 150:  # Increased threshold
+        if char_count > 120:
             rejection_reasons.append("too_many_characters")
         
-        # Rule 2: Reject identity blocks or personal information
-        identity_keywords = ["junaid ahmad", "lovely professional university", "phagwara", "regn no", "course code", "int 252", "submitted by", "submitted to", "dr.", "kamalpreet"]
+        # Rule 2: Reject identity blocks or names
+        identity_keywords = ["university", "registration", "b.tech", "name", "phagwara", "student", "college"]
         if any(keyword in text_clean.lower() for keyword in identity_keywords):
             rejection_reasons.append("identity_pattern")
         
-        # Rule 2b: Reject academic metadata
-        academic_patterns = [
-            r"project\s+(?:term|report)(?:\s+august)?",
-            r"b\.?tech\s*-?\s*computer\s+science",
-            r"school\s+of\s+computer\s+science",
-            r"^\(\s*project\s+term\s+",
-            r"registration\s*:\s*\d+",
-            r"course\s+code\s*:\s*[a-z]+\s*\d+"
-        ]
-        
-        for pattern in academic_patterns:
-            if re.search(pattern, text_clean, re.IGNORECASE):
-                rejection_reasons.append("academic_metadata")
-                break
-        
-        # Rule 3: Enhanced POS-based filtering
+        # Rule 3: POS-based filter (if POS features are available)
         if 'num_verbs' in row and 'num_nouns' in row and row['num_verbs'] > 0 and row['num_nouns'] > 0:
             total_pos = row['num_verbs'] + row['num_nouns'] + row.get('num_adjs', 0) + row.get('num_advs', 0)
             if total_pos > 0:
                 verb_ratio = row['num_verbs'] / total_pos
                 noun_ratio = row['num_nouns'] / total_pos
                 
-                # Reject if too many verbs and not enough nouns (sentence-like)
-                if verb_ratio > 0.4 and noun_ratio < 0.3:
+                if verb_ratio > 0.3 and noun_ratio < 0.2:
                     rejection_reasons.append("high_verb_low_noun_ratio")
         
-        # Rule 4: Must start with capital letter or number (with exceptions for Roman numerals)
+        # Rule 4: Must start with capital or number
         if text_clean and not (text_clean[0].isupper() or text_clean[0].isdigit()):
-            # Allow some exceptions for headings that start with lowercase Roman numerals
-            if not re.match(r'^[ivx]+\.', text_clean.lower()):
-                rejection_reasons.append("no_capital_or_number_start")
+            rejection_reasons.append("no_capital_or_number_start")
         
-        # Rule 4.5: Discard headings that start with lowercase and are long
-        if text_clean and text_clean[0].islower() and char_count > 50:
-            rejection_reasons.append("lowercase_long_heading")
-        
-        # Rule 5: Enhanced fragment detection
+        # Rule 5: Must not be fragments
         if word_count <= 2:
-            # Check if it contains common heading words or patterns
+            # Check if it contains common heading words
             has_heading_words = any(word.lower() in self.common_heading_words 
                                   for word in text_clean.split())
-            has_positive_pattern, _ = self.check_positive_patterns(text_clean)
-            
-            if not (has_heading_words or has_positive_pattern):
-                rejection_reasons.append("fragment_without_heading_indicators")
+            if not has_heading_words:
+                rejection_reasons.append("fragment_without_heading_words")
         
-        # Rule 6: Technical service names and repository names
-        tech_service_patterns = [
-            r"github\s*-\s*proact",
-            r"docker\s+hub\s*-",
-            r"frontend\s+service:",
-            r"api\s+gateway:",
-            r"platform\s+service\s*\(",
-            r"authentication\s+service:",
-            r"component\s+architecture\s+leverage"
-        ]
-        
-        for pattern in tech_service_patterns:
-            if re.search(pattern, text_clean, re.IGNORECASE):
-                rejection_reasons.append("technical_service_name")
-                break
-        
-        # Rule 7: Font and layout filtering with better thresholds
+        # Rule 6: Font and layout filtering
         if 'font_size' in row and self.document_stats.get('font_percentiles'):
             font_size = row['font_size']
-            p75_font_size = self.document_stats['font_percentiles'].get(75, 12)
             median_font_size = self.document_stats['font_percentiles'].get(50, 12)
             
-            # Be more lenient with font size requirements for academic documents
-            if font_size < median_font_size * 0.9:  # Less strict than before
-                # Additional checks for layout
-                line_pos = row.get('line_position_on_page', 0)
-                
-                # If it's small font AND not at top of page, likely not a heading
-                if line_pos > 5:  # Not near top of page
-                    rejection_reasons.append("small_font_not_prominent_position")
+            # Check center alignment (if available)
+            center_aligned = row.get('center_aligned', 0)
+            
+            # Check Y position normalization (if available)
+            y_position_norm = 0.5  # Default middle
+            if 'line_position_on_page' in row and 'page' in row:
+                page = row['page']
+                line_pos = row['line_position_on_page']
+                # Estimate position normalization (top 30% is < 0.3)
+                if line_pos <= 3:
+                    y_position_norm = 0.1  # Top
+                elif line_pos > 10:
+                    y_position_norm = 0.7  # Lower
+            
+            if (font_size < median_font_size and 
+                center_aligned == 0 and 
+                y_position_norm > 0.3):
+                rejection_reasons.append("poor_font_layout_position")
         
-        # Rule 8: Specific false positives from current output
+        # Additional specific patterns from examples
         specific_false_positives = [
-            "junaid ahmad", "lovely professional university", "b.tech - computer science and engineering",
-            "component architecture leverage chakra ui and tailwind css",
-            "authentication service: docker hub - auth-service",
-            "platform service (project management): docker hub",
-            "api gateway: docker hub - api-gateway",
-            "frontend service: docker hub - proactive_frontend",
-            "docker hub container images",
-            "github - proactive_india_backend",
-            "backend repository (microservices architecture):",
-            "frontend repository: github - proact_india_frontend",
-            "source code repositories",
-            "proactive india (live platform):",
-            "deployed application"
+            "junaid ahmad", "registration :", "lovely professional university",
+            "phagwara", "bcrypt.js", "these", "initially,", "dockerfile",
+            "automation,", "oracle vps"
         ]
         
-        if text_clean.lower() in [fp.lower() for fp in specific_false_positives]:
+        if text_clean.lower() in specific_false_positives:
             rejection_reasons.append("known_false_positive")
         
-        # Rule 9: Check for positive patterns to override some rejections
-        has_positive_pattern, positive_pattern = self.check_positive_patterns(text_clean)
-        if has_positive_pattern:
-            # Remove certain rejection reasons if we have strong positive indicators
-            strong_patterns = ['roman_numerals', 'numbered_sections', 'letter_headings', 'common_headings']
-            if positive_pattern in strong_patterns:
-                rejection_reasons = [r for r in rejection_reasons if r not in ['too_many_words', 'fragment_without_heading_indicators']]
+        # Check for system/technical fragments
+        system_fragments = [
+            "containerized infrastructure", "powered by docker",
+            "hosting environment", "oracle vps as the"
+        ]
+        
+        if any(fragment in text_clean.lower() for fragment in system_fragments):
+            rejection_reasons.append("system_fragment")
         
         # Should reject if any rejection reasons found
         should_reject = len(rejection_reasons) > 0
@@ -922,102 +860,6 @@ class IntelligentFilter:
                 logger.error(f"❌ Error saving simplified report: {e2}")
                 return simplified_report
     
-    def detect_document_title(self, df: pd.DataFrame) -> str:
-        """Detect the document title from the filtered headings and text blocks"""
-        logger.info("🔍 Detecting document title...")
-        
-        # Method 1: Look for a large font size text near the beginning
-        if 'font_size' in df.columns:
-            # Sort by page and position
-            if 'page' in df.columns and 'line_position_on_page' in df.columns:
-                first_page_blocks = df[df['page'] == 1].sort_values(['line_position_on_page'])
-            else:
-                first_page_blocks = df.head(20)  # First 20 blocks
-            
-            # Find blocks with largest font sizes
-            max_font_size = first_page_blocks['font_size'].max()
-            large_font_blocks = first_page_blocks[
-                first_page_blocks['font_size'] >= max_font_size * 0.9
-            ]
-            
-            # Filter out obvious non-titles
-            title_candidates = []
-            for _, row in large_font_blocks.iterrows():
-                text = str(row['text']).strip()
-                
-                # Skip if it looks like metadata
-                if any(pattern in text.lower() for pattern in [
-                    'project report', 'submitted by', 'registration', 'course code',
-                    'university', 'college', 'school of', 'august', 'november'
-                ]):
-                    continue
-                
-                # Skip if it's a person's name
-                if re.match(r'^[A-Z][a-z]+\s+[A-Z][a-z]+$', text):
-                    continue
-                
-                # Skip if it's too short or too long
-                word_count = len(text.split())
-                if word_count < 3 or word_count > 20:
-                    continue
-                
-                # Skip if it contains obvious heading markers
-                if re.match(r'^\s*[IVX]+\.|^\s*\d+\.', text):
-                    continue
-                    
-                title_candidates.append(text)
-            
-            if title_candidates:
-                # Return the longest meaningful title candidate
-                best_title = max(title_candidates, key=len)
-                logger.info(f"✅ Detected title: {best_title}")
-                return best_title
-        
-        # Method 2: Look for heading that sounds like a full title
-        headings = df[df.get('is_heading_pred', 0) == 1] if 'is_heading_pred' in df.columns else df
-        
-        title_patterns = [
-            r'implementation\s+of.*platform',
-            r'.*\s+in\s+.*\s+.*',  # "Something in Something Something"
-            r'.*:\s+.*',  # "Title: Subtitle"
-            r'.*\s+practices\s+in\s+.*',
-            r'.*\s+platform$',
-            r'.*\s+system$',
-            r'.*\s+framework$'
-        ]
-        
-        for _, row in headings.iterrows():
-            text = str(row['text']).strip()
-            word_count = len(text.split())
-            
-            # Skip obvious section headings
-            if re.match(r'^\s*[IVX]+\.|^\s*\d+\.|^\s*[A-Z]\.|abstract|introduction|conclusion', text, re.IGNORECASE):
-                continue
-                
-            # Look for title-like patterns
-            for pattern in title_patterns:
-                if re.search(pattern, text, re.IGNORECASE) and word_count >= 5:
-                    logger.info(f"✅ Detected title from heading: {text}")
-                    return text
-        
-        # Method 3: Fallback - look for the first meaningful H1 heading
-        h1_headings = df[df.get('final_heading_level', '') == 'H1'] if 'final_heading_level' in df.columns else df.head(5)
-        
-        for _, row in h1_headings.iterrows():
-            text = str(row['text']).strip()
-            word_count = len(text.split())
-            
-            # Skip section markers but keep descriptive titles
-            if (word_count >= 4 and 
-                not re.match(r'^\s*[IVX]+\.|^\s*\d+\.', text) and
-                not text.lower() in ['abstract', 'introduction', 'conclusion']):
-                logger.info(f"✅ Using H1 heading as title: {text}")
-                return text
-        
-        # Default fallback
-        logger.warning("⚠️  Could not detect document title, using default")
-        return "Document Title Not Detected"
-
     def tune_thresholds(self, df: pd.DataFrame, target_precision: float = 0.9):
         """Tune filtering thresholds based on validation data with known labels"""
         if 'is_heading' not in df.columns:

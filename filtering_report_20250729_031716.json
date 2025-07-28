@@ -1,0 +1,95 @@
+{
+  "timestamp": "2025-07-29T03:17:16.582147",
+  "document_stats": {
+    "total_blocks": 729,
+    "avg_font_size": 9.954897153197656,
+    "font_size_std": 0.6710809862394292,
+    "font_percentiles": {
+      "50": 9.960000038146973,
+      "70": 9.960000038146973,
+      "75": 9.960000038146973,
+      "80": 9.960000038146973,
+      "85": 9.960000038146973,
+      "90": 9.960000038146973,
+      "95": 9.960000038146973,
+      "98": 9.960000038146973,
+      "99": 9.960000038146973
+    },
+    "avg_word_count": 5.770919067215363,
+    "total_pages": 7,
+    "blocks_per_page": 104.14285714285714
+  },
+  "filtering_summary": {
+    "total_blocks": 729,
+    "original_predictions": 69,
+    "final_predictions": 23,
+    "filtered_count": 46,
+    "reduction_rate": 66.66666666666666
+  },
+  "decision_breakdown": {
+    "not_predicted": 660,
+    "filtered_hard_criteria": 36,
+    "keep_good_score": 23,
+    "filtered_default": 10
+  },
+  "examples": {
+    "filtered": [],
+    "preserved": [
+      {
+        "text": "I. I NTRODUCTION",
+        "filter_score": 0.6707142857142858,
+        "filter_reasons": "low_confidence_0.546; syntax_violations_1; font_very_large; structure_score_4; position_score_2"
+      },
+      {
+        "text": "II. Profile of the Problem",
+        "filter_score": 0.6707142857142858,
+        "filter_reasons": "low_confidence_0.446; syntax_violations_1; font_very_large; structure_score_4; position_score_2"
+      },
+      {
+        "text": "A. Government",
+        "filter_score": 0.579047619047619,
+        "filter_reasons": "low_confidence_0.385; syntax_violations_1; font_very_large; structure_score_3; position_score_2"
+      },
+      {
+        "text": "B. Contractors",
+        "filter_score": 0.579047619047619,
+        "filter_reasons": "low_confidence_0.384; syntax_violations_1; font_very_large; structure_score_3; position_score_2"
+      },
+      {
+        "text": "D. Containerization",
+        "filter_score": 0.579047619047619,
+        "filter_reasons": "low_confidence_0.336; syntax_violations_1; font_very_large; structure_score_3; position_score_2"
+      },
+      {
+        "text": "IV. Problem Analysis",
+        "filter_score": 0.885,
+        "filter_reasons": "low_confidence_0.594; syntax_violations_1; heading_candidate; font_very_large; structure_score_4; position_score_2"
+      },
+      {
+        "text": "A. Product Definition",
+        "filter_score": 0.779047619047619,
+        "filter_reasons": "medium_confidence_0.781; syntax_violations_1; font_very_large; structure_score_3; position_score_2"
+      },
+      {
+        "text": "B. Feasibility Analysis",
+        "filter_score": 0.9933333333333334,
+        "filter_reasons": "medium_confidence_0.769; syntax_violations_1; heading_candidate; font_very_large; structure_score_3; position_score_2"
+      },
+      {
+        "text": "A. System Architecture",
+        "filter_score": 0.7933333333333334,
+        "filter_reasons": "low_confidence_0.394; syntax_violations_1; heading_candidate; font_very_large; structure_score_3; position_score_2"
+      },
+      {
+        "text": "C. Continuous Integration and Deployment",
+        "filter_score": 0.9683333333333333,
+        "filter_reasons": "medium_confidence_0.856; syntax_violations_1; heading_candidate; font_very_large; structure_score_3; position_score_2"
+      }
+    ]
+  },
+  "thresholds": {
+    "high_confidence": 0.9,
+    "medium_confidence": 0.7,
+    "low_confidence": 0.5
+  }
+}

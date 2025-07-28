@@ -32,7 +32,6 @@ Date: July 28, 2025 (Enhanced with smart model selection)
 
 import os
 import sys
-import re
 import pandas as pd
 import numpy as np
 import pickle
@@ -40,7 +39,6 @@ import glob
 import json
 import logging
 import time
-import fitz  # PyMuPDF
 from pathlib import Path
 from datetime import datetime
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -57,24 +55,6 @@ try:
 except ImportError as e:
     INTELLIGENT_FILTER_AVAILABLE = False
     logger.warning(f"⚠️  Intelligent filtering system not available: {e}")
-
-# Import POS features handler
-try:
-    from pos_features_handler import POSFeaturesHandler
-    POS_FEATURES_AVAILABLE = True
-    logger.info("✅ POS features handler imported successfully")
-except ImportError as e:
-    POS_FEATURES_AVAILABLE = False
-    logger.warning(f"⚠️  POS features handler not available: {e}")
-
-# Import enhanced metadata extractor
-try:
-    from enhanced_metadata_extractor import EnhancedMetadataExtractor
-    ENHANCED_METADATA_AVAILABLE = True
-    logger.info("✅ Enhanced metadata extractor imported successfully")
-except ImportError as e:
-    ENHANCED_METADATA_AVAILABLE = False
-    logger.warning(f"⚠️  Enhanced metadata extractor not available: {e}")
 
 class JSONOutputGenerator:
     """Generate final JSON output for competition submission"""
@@ -106,14 +86,6 @@ class JSONOutputGenerator:
         self.feature_mismatch = False
         self.expected_feature_names = None
         self.actual_feature_names = None
-        
-        # Initialize intelligent filter for better filtering and title detection
-        try:
-            self.intelligent_filter = IntelligentFilter(config_path=os.path.join(self.base_dir, 'config_main.json'))
-            logger.info("✅ Intelligent filter initialized for enhanced processing")
-        except Exception as e:
-            logger.warning(f"⚠️  Could not initialize intelligent filter: {e}")
-            self.intelligent_filter = None
         
         logger.info("📤 JSON Output Generator initialized!")
         logger.info(f"📁 Input PDFs: {self.input_dir}")
@@ -875,15 +847,8 @@ class JSONOutputGenerator:
         else:
             return "H3"
     
-    def create_json_structure(self, pdf_name, headings_df, all_blocks_df=None):
-        """Create JSON structure for a PDF with enhanced title detection"""
-        
-        # Enhanced title detection using all blocks if available
-        if all_blocks_df is not None and hasattr(self, 'intelligent_filter') and self.intelligent_filter:
-            document_title = self.intelligent_filter.detect_document_title(all_blocks_df)
-        else:
-            # Fallback: try to detect from headings or use filename
-            document_title = self._detect_title_from_headings(headings_df, pdf_name)
+    def create_json_structure(self, pdf_name, headings_df):
+        """Create JSON structure for a PDF"""
         
         # Calculate font percentiles for heading level determination (fallback)
         if 'font_size' in headings_df.columns and len(headings_df) > 0:
@@ -942,37 +907,11 @@ class JSONOutputGenerator:
         
         # Create final JSON structure
         json_output = {
-            "title": document_title,
+            "title": pdf_name.replace('_', ' ').title(),
             "outline": outline
         }
         
         return json_output
-    
-    def _detect_title_from_headings(self, headings_df, pdf_name):
-        """Fallback method to detect title from headings"""
-        if len(headings_df) == 0:
-            return pdf_name.replace('_', ' ').replace('-', ' ').title()
-        
-        # Look for a title-like heading (long, descriptive)
-        for _, row in headings_df.iterrows():
-            text = str(row['text']).strip()
-            word_count = len(text.split())
-            
-            # Skip section markers
-            if re.match(r'^\s*[IVX]+\.|^\s*\d+\.', text):
-                continue
-                
-            # Look for descriptive titles
-            if (word_count >= 5 and 
-                not text.lower() in ['abstract', 'introduction', 'conclusion'] and
-                ('implementation' in text.lower() or 
-                 'platform' in text.lower() or 
-                 'system' in text.lower() or
-                 'practices' in text.lower())):
-                return text
-        
-        # Fallback to cleaned filename
-        return pdf_name.replace('_', ' ').replace('-', ' ').title()
     
     def validate_json_schema(self, json_data):
         """Validate JSON output against expected schema"""
@@ -1090,18 +1029,14 @@ class JSONOutputGenerator:
                 
                 if len(headings_df) == 0:
                     logger.warning(f"⚠️  No headings detected in {pdf_name}")
-                    # Create minimal JSON with no outline but try to detect title
-                    if self.intelligent_filter:
-                        title = self.intelligent_filter.detect_document_title(df_predictions)
-                    else:
-                        title = pdf_name.replace('_', ' ').title()
+                    # Create minimal JSON with no outline
                     json_output = {
-                        "title": title,
+                        "title": pdf_name.replace('_', ' ').title(),
                         "outline": []
                     }
                 else:
-                    # Create JSON structure with all blocks data for better title detection
-                    json_output = self.create_json_structure(pdf_name, headings_df, df_predictions)
+                    # Create JSON structure
+                    json_output = self.create_json_structure(pdf_name, headings_df)
                 
                 # Validate JSON schema
                 if not self.validate_json_schema(json_output):
@@ -1271,82 +1206,27 @@ class JSONOutputGenerator:
 
 
 def main():
-    """Main function - Automated mode for Docker execution or interactive mode"""
-    # Check if running in automated mode (Docker/CI environment)
-    automated_mode = (
-        os.getenv("AUTOMATED_MODE", "false").lower() == "true" or
-        os.getenv("MODE") == "1A" or  # Docker environment variable
-        "--automated" in sys.argv or
-        "--auto" in sys.argv
-    )
+    """Main function"""
+    print("📤 JSON OUTPUT GENERATION SCRIPT")
+    print("=" * 50)
+    print("🎯 Features:")
+    print("   ✅ Process PDFs from input or unprocessed folders")
+    print("   ✅ Extract blocks and generate heading predictions")
+    print("   ✅ Create structured JSON output with hierarchy")
+    print("   ✅ Save JSON files to output folder")
+    print("   ✅ Validate JSON schema compliance")
+    print("   ✅ Handle multilingual documents")
+    print("   ✅ Feature compatibility checking")
+    print()
     
-    if automated_mode:
-        print("📤 JSON OUTPUT GENERATION SCRIPT - AUTOMATED MODE")
-        print("=" * 60)
-        print("🎯 Features:")
-        print("   ✅ Process PDFs from input folder automatically")
-        print("   ✅ Extract blocks and generate heading predictions")
-        print("   ✅ Create structured JSON output with hierarchy")
-        print("   ✅ Save JSON files to output folder")
-        print("   ✅ Validate JSON schema compliance")
-        print("   ✅ Handle multilingual documents")
-        print("   ✅ Feature compatibility checking")
-        print()
-        
-        try:
-            generator = JSONOutputGenerator()
-            
-            # Automatically load the latest model
-            logger.info("🤖 Loading latest model automatically...")
-            if not generator.load_model("latest"):
-                logger.error("❌ Failed to load model - cannot proceed")
-                sys.exit(1)
-            
-            # Check feature compatibility
-            if not generator.check_feature_compatibility():
-                logger.warning("⚠️ Feature compatibility check failed, but continuing...")
-            
-            # Automatically process all PDFs in input folder
-            logger.info("📥 Processing all PDFs from input folder...")
-            success = generator.generate_json_output("input")
-            
-            if success:
-                logger.info("✅ JSON generation completed successfully!")
-                print("\n🎉 All PDFs processed successfully!")
-                print("📁 Check the output folder for generated JSON files")
-            else:
-                logger.error("❌ JSON generation failed!")
-                sys.exit(1)
-                
-        except KeyboardInterrupt:
-            print("\n👋 Generation interrupted by user")
-            sys.exit(1)
-        except Exception as e:
-            logger.error(f"❌ Generation error: {e}")
-            sys.exit(1)
-    
-    else:
-        # Interactive mode
-        print("📤 JSON OUTPUT GENERATION SCRIPT - INTERACTIVE MODE")
-        print("=" * 60)
-        print("🎯 Features:")
-        print("   ✅ Process PDFs from input or unprocessed folders")
-        print("   ✅ Extract blocks and generate heading predictions")
-        print("   ✅ Create structured JSON output with hierarchy")
-        print("   ✅ Save JSON files to output folder")
-        print("   ✅ Validate JSON schema compliance")
-        print("   ✅ Handle multilingual documents")
-        print("   ✅ Feature compatibility checking")
-        print()
-        
-        try:
-            generator = JSONOutputGenerator()
-            generator.interactive_menu()
-        except KeyboardInterrupt:
-            print("\n👋 Generation interrupted by user")
-        except Exception as e:
-            logger.error(f"❌ Generation error: {e}")
-            raise
+    try:
+        generator = JSONOutputGenerator()
+        generator.interactive_menu()
+    except KeyboardInterrupt:
+        print("\n👋 Generation interrupted by user")
+    except Exception as e:
+        logger.error(f"❌ Generation error: {e}")
+        raise
 
 
 if __name__ == "__main__":

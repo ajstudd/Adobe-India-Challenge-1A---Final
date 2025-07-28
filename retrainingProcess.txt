@@ -1,5 +1,0 @@
-first run the process pdf script
-then review the predicted files
-then put the corrected csvs in reviewed folder
-then run the enhance_prediction_features.py - this is actually modifying csvs in predictions folder
-then run the retrain script

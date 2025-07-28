@@ -1,0 +1,19 @@
+REVIEW FILE FOR: 2023-annual-report_final
+==================================================
+
+Summary:
+- Total text blocks: 1994
+- Predicted headings: 366
+- High confidence: 17
+- Needs review: 1977
+- Average confidence: 0.681
+
+Files:
+- CSV data: C:\Users\j7654\WorkStation\Adobe-India-Hackathon-25\Adobe-India-Challenge-1A\self_learn\extracted_csvs\2023-annual-report_final_extracted.csv
+- Pseudo-labeled: C:\Users\j7654\WorkStation\Adobe-India-Hackathon-25\Adobe-India-Challenge-1A\self_learn\pseudo_labeled\2023-annual-report_final_pseudo_labeled.csv
+
+INSTRUCTIONS:
+1. Review the pseudo-labeled CSV file
+2. Check predictions with low confidence
+3. Correct any misclassified headings
+4. Save corrected version for retraining

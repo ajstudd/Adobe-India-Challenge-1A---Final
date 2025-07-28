@@ -2,11 +2,3 @@ I believe the training method in master_pipeline is not configured well, my mode
 I have 15 labelled csvs in labelled_data folder. 
 take reference from self learn folder , I think there it was configured well. 
 My laptop specs are ryzen 5 4600H, 16BG RAM, 1TB SSD.
-
-
-
-
-----------------
-update the config or scripts, for minimum false positive , only pick heading 1 , heading 2, heading 3.
-currently it is picking sentences as well as heading.
-I am training the model on 13 labelled csv.
