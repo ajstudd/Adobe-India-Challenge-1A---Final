@@ -21,9 +21,10 @@ COPY ./enhanced_metadata_extractor.py .
 COPY ./generate_json_output.py .
 COPY ./enhance_prediction_features.py .
 COPY ./master_pipeline.py .
+COPY ./pos_features_handler.py .
 
-# Copy main pipeline script to root
-COPY ./src/pipeline.py .
+# Copy automated pipeline script to root
+COPY ./automated_pipeline.py .
 
 # Set environment variables
 ENV MODE=1A
@@ -33,4 +34,4 @@ ENV PYTHONPATH=/app
 # Create output directory
 RUN mkdir -p /app/output
 
-CMD ["python", "pipeline.py"]
+CMD ["python", "automated_pipeline.py"]

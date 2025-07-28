@@ -6,7 +6,7 @@ echo 🐳 ADOBE INDIA HACKATHON - DOCKER BUILD ^& TEST (Windows)
 echo =======================================================
 
 REM Configuration
-set IMAGE_NAME=adobe-heading-detector
+set IMAGE_NAME=adobe-automated-pipeline
 set CONTAINER_NAME=adobe-test-container
 set INPUT_DIR=.\input
 set OUTPUT_DIR=.\output
@@ -212,6 +212,6 @@ echo.
 call :log_info "Docker script completed."
 echo.
 echo 📋 QUICK REFERENCE:
-echo Build:  docker build --platform linux/amd64 -t adobe-heading-detector .
-echo Run:    docker run --rm -v "%cd%\input":/app/input:ro -v "%cd%\output":/app/output --network none adobe-heading-detector
-echo Debug:  docker run -it --rm -v "%cd%\input":/app/input:ro -v "%cd%\output":/app/output --entrypoint /bin/bash adobe-heading-detector
+echo Build:  docker build --platform linux/amd64 -t adobe-automated-pipeline .
+echo Run:    docker run --rm -v "%cd%\input":/app/input:ro -v "%cd%\output":/app/output --network none adobe-automated-pipeline
+echo Debug:  docker run -it --rm -v "%cd%\input":/app/input:ro -v "%cd%\output":/app/output --entrypoint /bin/bash adobe-automated-pipeline
