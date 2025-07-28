@@ -20,18 +20,19 @@ COPY ./intelligent_filter.py .
 COPY ./enhanced_metadata_extractor.py .
 COPY ./generate_json_output.py .
 COPY ./enhance_prediction_features.py .
-COPY ./master_pipeline.py .
 COPY ./pos_features_handler.py .
+COPY ./master_pipeline.py .
 
-# Copy automated pipeline script to root
-COPY ./automated_pipeline.py .
+# Copy main pipeline script to root
+COPY ./src/pipeline.py .
 
 # Set environment variables
 ENV MODE=1A
 ENV USE_ML=true
+ENV AUTOMATED_MODE=true
 ENV PYTHONPATH=/app
 
 # Create output directory
 RUN mkdir -p /app/output
 
-CMD ["python", "automated_pipeline.py"]
+CMD ["python", "pipeline.py"]

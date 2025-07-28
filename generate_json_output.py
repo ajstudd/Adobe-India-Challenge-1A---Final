@@ -40,6 +40,7 @@ import glob
 import json
 import logging
 import time
+import fitz  # PyMuPDF
 from pathlib import Path
 from datetime import datetime
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -56,6 +57,24 @@ try:
 except ImportError as e:
     INTELLIGENT_FILTER_AVAILABLE = False
     logger.warning(f"⚠️  Intelligent filtering system not available: {e}")
+
+# Import POS features handler
+try:
+    from pos_features_handler import POSFeaturesHandler
+    POS_FEATURES_AVAILABLE = True
+    logger.info("✅ POS features handler imported successfully")
+except ImportError as e:
+    POS_FEATURES_AVAILABLE = False
+    logger.warning(f"⚠️  POS features handler not available: {e}")
+
+# Import enhanced metadata extractor
+try:
+    from enhanced_metadata_extractor import EnhancedMetadataExtractor
+    ENHANCED_METADATA_AVAILABLE = True
+    logger.info("✅ Enhanced metadata extractor imported successfully")
+except ImportError as e:
+    ENHANCED_METADATA_AVAILABLE = False
+    logger.warning(f"⚠️  Enhanced metadata extractor not available: {e}")
 
 class JSONOutputGenerator:
     """Generate final JSON output for competition submission"""
@@ -1252,27 +1271,82 @@ class JSONOutputGenerator:
 
 
 def main():
-    """Main function"""
-    print("📤 JSON OUTPUT GENERATION SCRIPT")
-    print("=" * 50)
-    print("🎯 Features:")
-    print("   ✅ Process PDFs from input or unprocessed folders")
-    print("   ✅ Extract blocks and generate heading predictions")
-    print("   ✅ Create structured JSON output with hierarchy")
-    print("   ✅ Save JSON files to output folder")
-    print("   ✅ Validate JSON schema compliance")
-    print("   ✅ Handle multilingual documents")
-    print("   ✅ Feature compatibility checking")
-    print()
+    """Main function - Automated mode for Docker execution or interactive mode"""
+    # Check if running in automated mode (Docker/CI environment)
+    automated_mode = (
+        os.getenv("AUTOMATED_MODE", "false").lower() == "true" or
+        os.getenv("MODE") == "1A" or  # Docker environment variable
+        "--automated" in sys.argv or
+        "--auto" in sys.argv
+    )
     
-    try:
-        generator = JSONOutputGenerator()
-        generator.interactive_menu()
-    except KeyboardInterrupt:
-        print("\n👋 Generation interrupted by user")
-    except Exception as e:
-        logger.error(f"❌ Generation error: {e}")
-        raise
+    if automated_mode:
+        print("📤 JSON OUTPUT GENERATION SCRIPT - AUTOMATED MODE")
+        print("=" * 60)
+        print("🎯 Features:")
+        print("   ✅ Process PDFs from input folder automatically")
+        print("   ✅ Extract blocks and generate heading predictions")
+        print("   ✅ Create structured JSON output with hierarchy")
+        print("   ✅ Save JSON files to output folder")
+        print("   ✅ Validate JSON schema compliance")
+        print("   ✅ Handle multilingual documents")
+        print("   ✅ Feature compatibility checking")
+        print()
+        
+        try:
+            generator = JSONOutputGenerator()
+            
+            # Automatically load the latest model
+            logger.info("🤖 Loading latest model automatically...")
+            if not generator.load_model("latest"):
+                logger.error("❌ Failed to load model - cannot proceed")
+                sys.exit(1)
+            
+            # Check feature compatibility
+            if not generator.check_feature_compatibility():
+                logger.warning("⚠️ Feature compatibility check failed, but continuing...")
+            
+            # Automatically process all PDFs in input folder
+            logger.info("📥 Processing all PDFs from input folder...")
+            success = generator.generate_json_output("input")
+            
+            if success:
+                logger.info("✅ JSON generation completed successfully!")
+                print("\n🎉 All PDFs processed successfully!")
+                print("📁 Check the output folder for generated JSON files")
+            else:
+                logger.error("❌ JSON generation failed!")
+                sys.exit(1)
+                
+        except KeyboardInterrupt:
+            print("\n👋 Generation interrupted by user")
+            sys.exit(1)
+        except Exception as e:
+            logger.error(f"❌ Generation error: {e}")
+            sys.exit(1)
+    
+    else:
+        # Interactive mode
+        print("📤 JSON OUTPUT GENERATION SCRIPT - INTERACTIVE MODE")
+        print("=" * 60)
+        print("🎯 Features:")
+        print("   ✅ Process PDFs from input or unprocessed folders")
+        print("   ✅ Extract blocks and generate heading predictions")
+        print("   ✅ Create structured JSON output with hierarchy")
+        print("   ✅ Save JSON files to output folder")
+        print("   ✅ Validate JSON schema compliance")
+        print("   ✅ Handle multilingual documents")
+        print("   ✅ Feature compatibility checking")
+        print()
+        
+        try:
+            generator = JSONOutputGenerator()
+            generator.interactive_menu()
+        except KeyboardInterrupt:
+            print("\n👋 Generation interrupted by user")
+        except Exception as e:
+            logger.error(f"❌ Generation error: {e}")
+            raise
 
 
 if __name__ == "__main__":
