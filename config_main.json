@@ -1,12 +1,12 @@
 {
   "pipeline_settings": {
-    "training_mode": "ultra_precision",
-    "confidence_threshold": 0.85,
+    "training_mode": "balanced",
+    "confidence_threshold": 0.5,
     "min_heading_percentage": 0.5,
-    "precision_focus": true,
-    "strict_heading_criteria": true,
+    "precision_focus": false,
+    "strict_heading_criteria": false,
     "enable_intelligent_filtering": true,
-    "filtering_strictness": "moderate"
+    "filtering_strictness": "lenient"
   },
   "feature_engineering": {
     "font_percentiles": [70, 75, 80, 85, 90, 95, 98, 99],
@@ -53,12 +53,12 @@
     "norm": "l2"
   },
   "precision_filters": {
-    "min_font_size_percentile": 70,
-    "max_word_count": 20,
+    "min_font_size_percentile": 50,
+    "max_word_count": 30,
     "min_word_count": 1,
-    "required_heading_patterns": true,
-    "exclude_sentence_patterns": true,
-    "strict_position_requirements": true
+    "required_heading_patterns": false,
+    "exclude_sentence_patterns": false,
+    "strict_position_requirements": false
   },
   "heading_criteria": {
     "level_1_requirements": {

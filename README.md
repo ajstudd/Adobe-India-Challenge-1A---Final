@@ -230,7 +230,7 @@ python master_pipeline.py
 ### Testing with Custom PDFs
 
 ```bash
-python generate_json_output.py
+python generate_corrected_json.py
 ```
 
 ### Validating Output

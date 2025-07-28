@@ -1,0 +1,2 @@
+-These are the fields/features present in labelled csv files
+text	font_size	page	x0	y0	x1	y1	font	bold	italic	underline	color	bullet	math	hyperlink	is_all_caps	is_title_case	ends_with_colon	starts_with_number	punctuation_count	contains_colon	contains_semicolon	word_count	line_position_on_page	relative_font_size	distance_to_previous_heading	line_spacing_above	is_heading	heading_level	num_nouns	num_verbs	num_adjs	num_advs	num_propn	num_pronouns	num_other_pos
