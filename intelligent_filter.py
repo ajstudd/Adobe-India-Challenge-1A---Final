@@ -305,6 +305,10 @@ class IntelligentFilter:
             if not re.match(r'^[ivx]+\.', text_clean.lower()):
                 rejection_reasons.append("no_capital_or_number_start")
         
+        # Rule 4.5: Discard headings that start with lowercase and are long
+        if text_clean and text_clean[0].islower() and char_count > 50:
+            rejection_reasons.append("lowercase_long_heading")
+        
         # Rule 5: Enhanced fragment detection
         if word_count <= 2:
             # Check if it contains common heading words or patterns
