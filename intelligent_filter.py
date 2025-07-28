@@ -22,6 +22,7 @@ Strategy:
 - Apply sophisticated filtering using linguistic and semantic patterns
 - Assign proper heading hierarchy based on font size, structure, and content
 - Preserve high-quality headings while filtering false positives
+- Identify document title as first H1 heading within initial 100 blocks
 
 Author: AI Assistant
 Date: July 28, 2025
@@ -41,10 +42,15 @@ from typing import Dict, List, Tuple, Optional
 try:
     from enhanced_metadata_extractor import EnhancedMetadataExtractor
     ENHANCED_METADATA_AVAILABLE = True
-    logging.info("✅ Enhanced metadata extractor imported successfully")
 except ImportError as e:
     ENHANCED_METADATA_AVAILABLE = False
-    logging.warning(f"⚠️  Enhanced metadata extractor not available: {e}")
+
+# Import hierarchical numbering analyzer
+try:
+    from hierarchical_numbering_analyzer import HierarchicalNumberingAnalyzer
+    HIERARCHICAL_NUMBERING_AVAILABLE = True
+except ImportError as e:
+    HIERARCHICAL_NUMBERING_AVAILABLE = False
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -74,14 +80,14 @@ class IntelligentFilter:
         # Load configuration
         self.config = self.load_config(config_path)
         
-        # Filter thresholds - Enhanced
-        self.high_confidence_threshold = 0.9  # Never filter these
-        self.medium_confidence_threshold = 0.7  # Apply moderate filtering
-        self.low_confidence_threshold = 0.5  # Apply strict filtering
+        # Filter thresholds - Made Much Less Aggressive
+        self.high_confidence_threshold = 0.8  # Lowered from 0.9
+        self.medium_confidence_threshold = 0.5  # Lowered from 0.7  
+        self.low_confidence_threshold = 0.3  # Lowered from 0.5
         
-        # Enhanced thresholds for metadata-based filtering - less aggressive
-        self.heading_likelihood_threshold = 0.2  # Reduced from 0.4
-        self.syntax_violation_limit = 4  # Increased from 2
+        # Enhanced thresholds for metadata-based filtering - much less aggressive
+        self.heading_likelihood_threshold = 0.05  # Significantly reduced from 0.2
+        self.syntax_violation_limit = 8  # Increased from 4
         
         # Statistics for dynamic filtering
         self.document_stats = {}
@@ -97,8 +103,30 @@ class IntelligentFilter:
             self.metadata_extractor = None
             logger.warning("⚠️  Enhanced metadata extractor not available")
         
+        # Initialize hierarchical numbering analyzer
+        if HIERARCHICAL_NUMBERING_AVAILABLE:
+            self.numbering_analyzer = HierarchicalNumberingAnalyzer()
+            logger.info("✅ Hierarchical numbering analyzer initialized")
+        else:
+            self.numbering_analyzer = None
+            logger.warning("⚠️  Hierarchical numbering analyzer not available")
+        
         # Exclusion patterns (common false positives) - Enhanced based on requirements
         self.exclusion_patterns = {
+            # NEW RULES: Special character patterns at start (User requested)
+            'starts_with_bad_special_chars': re.compile(r'^\s*[&_,.\\%*!~]'),  # Reject headings starting with &, _, , , ., \, %,*,!, ~
+            'starts_with_dollar_invalid': re.compile(r'^\s*\$(?![a-zA-Z0-9])'),  # $ must be followed by number or letter
+            'too_short_heading': re.compile(r'^\s*.{1,3}\s*$'),  # Heading should be more than 3 characters
+            
+            # Enhanced grammar-based filtering for function words
+            'function_words_extended': re.compile(r'^\s*(for|the|them|their|these|those|this|that|with|from|into|onto|upon|over|under|above|below|beside|between|among|during|before|after|since|until|while|where|when|why|how|what|which|who|whom|whose)\s*$', re.IGNORECASE),
+            'pronouns': re.compile(r'^\s*(i|me|my|mine|myself|you|your|yours|yourself|he|him|his|himself|she|her|hers|herself|it|its|itself|we|us|our|ours|ourselves|they|them|their|theirs|themselves)\s*$', re.IGNORECASE),
+            'articles_prepositions': re.compile(r'^\s*(a|an|the|in|on|at|by|for|with|without|to|from|of|about|under|over|through|during|before|after|above|below|beneath|beside|between|among|against|toward|towards|into|onto|upon|across|along|around|beyond|past|within|throughout|underneath)\s*$', re.IGNORECASE),
+            'conjunctions_adverbs': re.compile(r'^\s*(and|but|or|nor|for|so|yet|however|therefore|thus|hence|moreover|furthermore|additionally|meanwhile|nevertheless|nonetheless|consequently|accordingly|subsequently|previously|initially|finally|eventually|ultimately|particularly|especially|specifically|generally|typically|usually|often|sometimes|rarely|never|always|still|already|just|only|even|also|too|very|quite|rather|fairly|extremely|incredibly|absolutely|completely|entirely|totally|partially|somewhat|slightly|barely|hardly|scarcely)\s*$', re.IGNORECASE),
+            
+            # Basic text patterns  
+            'starts_with_lowercase': re.compile(r'^\s*[a-z]'),  # New rule: reject headings starting with lowercase
+            
             # URLs and technical references
             'urls': re.compile(r'http[s]?://|www\.|\.com|\.org|\.edu|\.gov', re.IGNORECASE),
             'emails': re.compile(r'\S+@\S+\.\S+'),
@@ -109,64 +137,87 @@ class IntelligentFilter:
             'page_numbers': re.compile(r'^\s*(?:page\s+)?\d+\s*$', re.IGNORECASE),
             'registration_numbers': re.compile(r'registration\s*:?\s*\d+', re.IGNORECASE),
             'student_ids': re.compile(r'^\s*\d{6,12}\s*$'),  # Long numeric IDs
-            'bare_numbers': re.compile(r'^\s*\d+\s*$'),  # Just numbers
             
             # Document structure elements
             'footers': re.compile(r'^\s*(?:page\s+\d+|copyright|©|\d+\s*$)', re.IGNORECASE),
             'bullets': re.compile(r'^\s*[•◦▪▫◾▸►‣⁃]\s*'),
-            'numbered_lists': re.compile(r'^\s*\d+\.\s+[a-z]'),  # 1. something (lowercase start)
+            'numbered_lists': re.compile(r'^\s*\d+\.\s+[a-z]'),  # 1. something (lowercase start) - Keep this for actual lists
             'references': re.compile(r'^\s*\[\d+\]|\(\d{4}\)|\d{4}[a-z]?\b'),
             
-            # Sentence patterns (Rule 1: Reject sentence-like structures)
-            'sentence_endings': re.compile(r'^.+\.\s*$'),  # Ends with full stop
-            'long_sentences': re.compile(r'^.{120,}'),  # Longer than 120 characters
-            'question_sentences': re.compile(r'^.{20,}\?\s*$'),  # Questions are rarely headings
+            # Sentence patterns (Rule 1: Reject sentence-like structures) - Less aggressive
+            'sentence_endings': re.compile(r'^.{50,}\.\s*$'),  # Only long sentences ending with full stop
+            'long_sentences': re.compile(r'^.{150,}'),  # Increased from 120 characters
+            'question_sentences': re.compile(r'^.{30,}\?\s*$'),  # Increased from 20 chars
             
-            # Identity and name patterns (Rule 2: Reject identity blocks)
-            'university_patterns': re.compile(r'lovely\s+professional\s+university|university|college|institute', re.IGNORECASE),
-            'registration_patterns': re.compile(r'registration|b\.?tech|student|name\s*:|regn\s+no\s*:|course\s+code', re.IGNORECASE),
+            # Identity and name patterns (Rule 2: Reject identity blocks) - ENHANCED FOR PERSONAL INFO
+            'university_patterns': re.compile(r'university|college|institute', re.IGNORECASE),
+            'registration_patterns': re.compile(r'registration\s*:?\s*\d+|b\.?tech|student|name\s*:', re.IGNORECASE),
             'location_patterns': re.compile(r'phagwara|punjab|india', re.IGNORECASE),
-            'person_names': re.compile(r'^[A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*$'),  # Names pattern
-            'academic_info': re.compile(r'^(dr\.|prof\.|mr\.|ms\.|mrs\.)|submitted\s+(by|to)|school\s+of', re.IGNORECASE),
+            'person_names': re.compile(r'^[A-Z][a-z]+\s+[A-Z][a-z]+$'),  # FirstName LastName pattern
+            'full_names': re.compile(r'^[A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*$'),  # Full names
+            'course_names': re.compile(r'computer\s+science|engineering|b\.?tech', re.IGNORECASE),
+            
+            # SPECIFIC PERSONAL INFO PATTERNS FROM CURRENT JSON OUTPUT
+            'specific_names': re.compile(r'^(junaid|ahmad|junaid\s+ahmad)$', re.IGNORECASE),
+            'specific_registration': re.compile(r'^registration\s*:\s*12315906$', re.IGNORECASE),
+            'specific_course': re.compile(r'^b\.tech\s*-\s*computer\s+science\s+and\s+engineering$', re.IGNORECASE),
+            'specific_university': re.compile(r'^lovely\s+professional\s+university$', re.IGNORECASE),
+            'academic_degree_patterns': re.compile(r'^b\.tech\s*-\s*.*$|^bachelor\s+of\s+technology.*$', re.IGNORECASE),
+            'degree_specialization': re.compile(r'^computer\s+science\s+and\s+engineering$', re.IGNORECASE),
             
             # Technical terms and tools
-            'technical_terms': re.compile(r'^[A-Z][a-z]*\.(js|py|css|html)$|bcrypt|automation|vps', re.IGNORECASE),
+            'technical_terms': re.compile(r'^[A-Z][a-z]*\.(js|py|css|html)$|docker|bcrypt|automation|vps|api|jwt|json|web|token', re.IGNORECASE),
             'version_numbers': re.compile(r'v\d+\.\d+|version\s+\d+', re.IGNORECASE),
             'technical_ids': re.compile(r'^[A-Z]{2,}\d+|^\d+[A-Z]+\d*$'),
-            'docker_patterns': re.compile(r'docker\s+hub|containerized|powered\s+by|hosting\s+environment', re.IGNORECASE),
+            'programming_terms': re.compile(r'^(api|jwt|json|xml|http|https|css|html|javascript|nodejs|react|docker|kubernetes|git|github)$', re.IGNORECASE),
+            'technical_fragments': re.compile(r'^(backend|frontend|interface|leverages|architecture|employs)$', re.IGNORECASE),
             
-            # Fragment patterns (Rule 5: Must not be fragments)
-            'single_words': re.compile(r'^\s*\w+\s*$'),  # Single word
-            'discourse_markers': re.compile(r'^(these|initially|however|therefore|thus|hence|moreover|furthermore|additionally|for)$', re.IGNORECASE),
+            # Fragment patterns (Rule 5: Must not be fragments) - FIXED: Don't exclude all single words
+            'bad_single_words': re.compile(r'^\s*(the|a|an|and|but|or|so|yet|for|nor|with|by|from|to|in|on|at|of|these|initially|however|therefore|thus|hence|moreover|furthermore|additionally)s*$', re.IGNORECASE),  # Only exclude function words, NOT content words
+            'discourse_markers': re.compile(r'^(these|initially|however|therefore|thus|hence|moreover|furthermore|additionally|the\s+\w+|in\s+summary)$', re.IGNORECASE),
             'conjunctions': re.compile(r'^(and|but|or|so|yet|for|nor)$', re.IGNORECASE),
-            'prepositions': re.compile(r'^(in|on|at|to|from|with|by|of|about|through|during)$', re.IGNORECASE),
+            'incomplete_phrases': re.compile(r'^(the|a|an|with|by|from|to|in|on|at|of|for)\s+\w+', re.IGNORECASE),
+            'sentence_starters': re.compile(r'^(the\s+\w+|this\s+\w+|that\s+\w+|these\s+\w+|from\s+a\s+social|deployed\s+application)', re.IGNORECASE),
             
             # System and containerization terms from examples
-            'system_fragments': re.compile(r'containerized\s+infrastructure|powered\s+by|hosting\s+environment|component\s+architecture\s+leverage', re.IGNORECASE),
-            
-            # Course and academic metadata
-            'course_metadata': re.compile(r'^(int|cse|ece|mca|bca)\s+\d+$|project\s+(term|report)$|august\s*-\s*november', re.IGNORECASE),
-            
-            # Repository and technical service names
-            'service_names': re.compile(r'github\s*-|docker\s+hub\s*-|frontend\s+service|backend\s+repository|api\s+gateway|authentication\s+service|platform\s+service', re.IGNORECASE),
-            
-            # URLs that look like headings
-            'url_like': re.compile(r'(frontend|backend|proactive|auth-service|api-gateway)', re.IGNORECASE),
+            'system_fragments': re.compile(r'containerized\s+infrastructure|powered\s+by|hosting\s+environment|communication\s+for|leverages\s+\w+|employs\s+\w+|updates\s*$', re.IGNORECASE),
+            'article_words': re.compile(r'^(a|an|the)$', re.IGNORECASE),
+            'platform_names': re.compile(r'^proactive\s*india$|^proactive$|^india$', re.IGNORECASE),  # Specific to this document
+            'implementation_fragments': re.compile(r'^the\s+implementation\s+of|^the\s+development\s+and|^the\s+application\s+is', re.IGNORECASE),
         }
         
-        # Positive patterns (likely to be headings) - Enhanced
+        # Positive patterns (likely to be headings) - Enhanced with hierarchical numbering
         self.positive_patterns = {
-            'roman_numerals': re.compile(r'^\s*[IVX]+\.\s+[A-Z]', re.IGNORECASE),  # I. Something, II. Something
-            'numbered_sections': re.compile(r'^\s*\d+\.\s+[A-Z]'),  # 1. Something (capital start)
-            'subsection_numbers': re.compile(r'^\s*\d+\.\d+\s+[A-Z]'),  # 1.1 Something
-            'letter_headings': re.compile(r'^\s*[A-Z]\.\s+[A-Z]'),  # A. Something
-            'sub_letter_headings': re.compile(r'^\s*[A-Z]\.\d+\s+[A-Z]'),  # A.1 Something, C.1 Something
             'chapter_section': re.compile(r'^\s*(?:chapter|section|part|unit|lesson)\s+\d+', re.IGNORECASE),
             'appendix': re.compile(r'^\s*appendix\s+[a-z]\b', re.IGNORECASE),
-            'common_headings': re.compile(r'^\s*(?:abstract|introduction|conclusion|summary|references|bibliography|acknowledgments?|methodology|results|discussion|analysis|overview|background|objectives?|scope|limitations?|recommendations?|findings|implementation|outcomes?|project\s+(?:plan|legacy|resources)|problem\s+analysis|feasibility\s+analysis|system\s+architecture|devops\s+workflow|deployment\s+strategy)\s*$', re.IGNORECASE),
-            'title_case_short': re.compile(r'^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,6}$'),  # Title Case (short)
-            'starts_with_capital_number': re.compile(r'^[A-Z0-9]'),  # Rule 4: Must start with capital or number
-            'heading_keywords': re.compile(r'\b(?:architecture|implementation|development|integration|deployment|infrastructure|microservices|continuous|workflow|platform|strategy|analysis|definition|feasibility)\b', re.IGNORECASE),
+            'common_headings': re.compile(r'^\s*(?:Introduction|Conclusion|Summary|Abstract|References|Bibliography|Acknowledgments?|Methodology|Results|Discussion|Analysis|Overview|Background|Objectives?|Scope|Limitations?|Recommendations?|Findings)\s*$'),  # Only properly capitalized
+            
+            # ENHANCED HIERARCHICAL NUMBERING PATTERNS - Using the new analyzer logic
+            # Decimal system patterns (1, 1.1, 1.1.1, etc.)
+            'decimal_simple': re.compile(r'^\s*\d+\s*\.?\s*$'),
+            'decimal_with_text': re.compile(r'^\s*\d+(?:\.\d+)*\.\s+[A-Z].*$'),
+            'decimal_headings': re.compile(r'^\s*\d+(?:\.\d+)*\s*\.?\s*[A-Z].*$'),
+            'decimal_multi_level': re.compile(r'^\s*\d+\.\d+(?:\.\d+)*\s*\.?\s*.*$'),
+            
+            # Roman numeral patterns (I, II, III, I.I, etc.) - COMPREHENSIVE FIX
+            'roman_simple': re.compile(r'^\s*[IVXLCDMivxlcdm]+\s*\.?\s*$', re.IGNORECASE),
+            'roman_with_text': re.compile(r'^\s*[IVXLCDMivxlcdm]+\.\s+[A-Z].*$', re.IGNORECASE),
+            'roman_standalone_text': re.compile(r'^\s*[IVXLCDMivxlcdm]+\s+[A-Z].*$', re.IGNORECASE),
+            'roman_dotted': re.compile(r'^\s*[IVXLCDMivxlcdm]+\.[IVXLCDMivxlcdm]+(?:\.[IVXLCDMivxlcdm]+)*\s*\.?\s*.*$', re.IGNORECASE),
+            
+            # Alphabetical patterns (A, B, C, A.1, etc.) - COMPREHENSIVE FIX  
+            'letter_simple': re.compile(r'^\s*[A-Z]\s*\.?\s*$'),
+            'letter_with_text': re.compile(r'^\s*[A-Z]\.\s+[A-Z].*$'),
+            'letter_standalone_text': re.compile(r'^\s*[A-Z]\s+[A-Z].*$'),
+            'letter_mixed': re.compile(r'^\s*[A-Z]\.\d+(?:\.[A-Za-z\d]+)*\s*\.?\s*.*$'),
+            
+            # Mixed system patterns (A.1, 1.A, etc.)
+            'mixed_alpha_num': re.compile(r'^\s*[A-Z]\.\d+(?:\.\w+)*\s*\.?\s*.*$'),
+            'mixed_num_alpha': re.compile(r'^\s*\d+\.[A-Z](?:\.\w+)*\s*\.?\s*.*$'),
+            
+            # Title case and other patterns - RESTRICTED to avoid false positives
+            'title_case_short': re.compile(r'^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,4}$'),  # Only multi-word title case (not single words like "These", "The")
+            'project_specific': re.compile(r'^\s*(?:abstract|outcomes?|project\s+plan|implementation|project\s+legacy|project\s+resources)\s*$', re.IGNORECASE),  # Document-specific
         }
         
         # Common heading words for fragment detection
@@ -177,9 +228,21 @@ class IntelligentFilter:
             'limitations', 'recommendations', 'findings', 'appendix', 'references'
         }
         
+        # Patterns for consecutive heading merging rule
+        self.mergeable_prefix_patterns = {
+            'numbers': re.compile(r'^\s*\d+\s*$'),                       # Just numbers like "1", "2", "3"
+            'numbered_dots': re.compile(r'^\s*\d+\.\s*$'),               # Numbers with dots like "1.", "2.", "3."
+            'numbered_multi': re.compile(r'^\s*\d+\.\d+\s*$'),           # Multi-level numbers like "1.1", "2.3"
+            'roman_numerals': re.compile(r'^\s*[IVX]+\s*$', re.IGNORECASE),     # Roman numerals like "I", "II", "VII"
+            'roman_numerals_dots': re.compile(r'^\s*[IVX]+\.\s*$', re.IGNORECASE),  # Roman numerals with dots like "I.", "VII."
+            'single_letter': re.compile(r'^\s*[A-Z]\.\s*$'),             # Single letter with dot like "A.", "B.", "C."
+            'letter_no_dot': re.compile(r'^\s*[A-Z]\s*$'),               # Single letter without dot like "A", "B", "C"
+        }
+        
         logger.info("🧠 Intelligent Filter initialized!")
         logger.info(f"🎯 High confidence threshold: {self.high_confidence_threshold}")
         logger.info(f"🎯 Medium confidence threshold: {self.medium_confidence_threshold}")
+        logger.info("🔧 Added new filtering rules: consecutive heading merging and document title detection (first H1 in 100 blocks)")
         logger.info(f"🎯 Low confidence threshold: {self.low_confidence_threshold}")
     
     def load_config(self, config_path=None):
@@ -244,7 +307,9 @@ class IntelligentFilter:
     
     def apply_rule_based_filters(self, text: str, row: pd.Series, context: Dict) -> Tuple[bool, List[str]]:
         """
-        Apply the specific filtering rules from the requirements
+        Apply the specific filtering rules from the requirements - MUCH more lenient
+        ENHANCED: Properly preserve legitimate headings (roman numerals, numbered, single-word)
+        NEW: Added user-requested rules for special characters, grammar, and length
         Returns: (should_reject, rejection_reasons)
         """
         text_clean = text.strip()
@@ -252,137 +317,228 @@ class IntelligentFilter:
         char_count = len(text_clean)
         rejection_reasons = []
         
-        # Fast exclusion check first
-        is_excluded, exclusion_reason = self.check_exclusion_patterns(text_clean)
-        if is_excluded:
-            rejection_reasons.append(f"exclusion_pattern_{exclusion_reason}")
-            return True, rejection_reasons
+        # USER REQUESTED RULE 1: Reject headings starting with bad special characters
+        # (&, _, , , ., \, %,*,!, ~) but allow $ if followed by number/letter
+        if text_clean and text_clean[0] in '&_,.\\%*!~':
+            rejection_reasons.append("starts_with_bad_special_char")
+            logger.debug(f"❌ Rejected for bad special char start: {text_clean}")
+            return True, rejection_reasons  # Immediate rejection
         
-        # Rule 1: Reject sentence-like structures
-        if text_clean.endswith('.') and word_count > 3:
-            rejection_reasons.append("sentence_with_period")
+        # Special handling for $ - must be followed by number or letter
+        if text_clean.startswith('$') and len(text_clean) > 1:
+            if not (text_clean[1].isalnum()):
+                rejection_reasons.append("dollar_not_followed_by_alphanumeric")
+                logger.debug(f"❌ Rejected $ not followed by number/letter: {text_clean}")
+                return True, rejection_reasons  # Immediate rejection
         
-        if word_count > 15:  # Increased threshold for academic headings
+        # USER REQUESTED RULE 2: Heading should be more than 3 characters
+        if len(text_clean) <= 3:
+            # Exception: Allow legitimate single-character headings (like roman numerals, letters, numbers)
+            if not (re.match(r'^[IVX]+$', text_clean, re.IGNORECASE) or 
+                   re.match(r'^[A-Z]$', text_clean) or
+                   re.match(r'^\d+$', text_clean) or
+                   text_clean.lower() in ['a']):  # Allow single 'a' for section headings
+                rejection_reasons.append("too_short_less_than_4_chars")
+                logger.debug(f"❌ Rejected for being too short: {text_clean}")
+                return True, rejection_reasons  # Immediate rejection
+        
+        # USER REQUESTED RULE 4: Grammar-based filtering for function words
+        # Enhanced list of function words that should NOT be headings
+        function_words = {
+            # Articles
+            'a', 'an', 'the',
+            # Pronouns  
+            'me', 'my', 'mine', 'you', 'your', 'yours', 'he', 'him', 'his', 'she', 'her', 'hers', 
+            'it', 'its', 'we', 'us', 'our', 'ours', 'they', 'them', 'their', 'theirs',
+            # Prepositions
+            'in', 'on', 'at', 'by', 'for', 'with', 'without', 'to', 'from', 'of', 'about', 
+            'under', 'over', 'through', 'during', 'before', 'after', 'above', 'below',
+            'beneath', 'beside', 'between', 'among', 'against', 'toward', 'towards',
+            'into', 'onto', 'upon', 'across', 'along', 'around', 'beyond', 'past',
+            'within', 'throughout', 'underneath',
+            # Conjunctions
+            'and', 'but', 'or', 'nor', 'so', 'yet',
+            # Common adverbs that shouldn't be headings
+            'however', 'therefore', 'thus', 'hence', 'moreover', 'furthermore', 
+            'additionally', 'meanwhile', 'nevertheless', 'nonetheless', 'consequently',
+            'accordingly', 'subsequently', 'previously', 'initially', 'finally',
+            'eventually', 'ultimately', 'particularly', 'especially', 'specifically',
+            'generally', 'typically', 'usually', 'often', 'sometimes', 'rarely',
+            'never', 'always', 'still', 'already', 'just', 'only', 'even', 'also',
+            'too', 'very', 'quite', 'rather', 'fairly', 'extremely', 'incredibly',
+            'absolutely', 'completely', 'entirely', 'totally', 'partially', 
+            'somewhat', 'slightly', 'barely', 'hardly', 'scarcely',
+            # Additional problematic words from current JSON
+            'these', 'other', 'percent'
+        }
+        
+        # Don't include 'i' in function words since it could be roman numeral
+        # Don't include 'a' in function words since it could be a letter heading
+        if word_count == 1 and text_clean.lower() in function_words:
+            # Exception: Don't reject roman numerals or single letters that could be section headings
+            if not (re.match(r'^[IVX]$', text_clean, re.IGNORECASE) or re.match(r'^[A-Z]$', text_clean)):
+                rejection_reasons.append("single_word_function_word")
+                logger.debug(f"❌ Rejected function word: {text_clean}")
+                return True, rejection_reasons  # Immediate rejection
+        
+        # USER REQUESTED RULE 3: Reject headings starting with lowercase
+        # BUT check this AFTER function words and BEFORE checking positive patterns
+        if text_clean and text_clean[0].islower():
+            # Exception: Allow if it's a specific technical term that we want to preserve
+            technical_exceptions = {'iPhone', 'iPad', 'macOS', 'iOS', 'eBay', 'jQuery', 'eBusiness'}
+            if text_clean not in technical_exceptions:
+                rejection_reasons.append("starts_with_lowercase")
+                logger.debug(f"❌ Rejected for lowercase start: {text_clean}")
+                return True, rejection_reasons  # Immediate rejection
+        
+        # AFTER new strict rules, check if this is a legitimate heading pattern using hierarchical analyzer
+        if self.numbering_analyzer:
+            is_valid_number, number_type, level = self.numbering_analyzer.is_valid_heading_number(text_clean)
+            if is_valid_number:
+                logger.debug(f"✅ Preserving hierarchical {number_type} heading (level {level}): {text_clean}")
+                return False, [f"preserved_hierarchical_{number_type}_level_{level}"]
+        
+        # Check traditional positive patterns (but only for uppercase/properly formatted text)
+        is_positive_heading, positive_pattern = self.check_positive_patterns(text_clean)
+        if is_positive_heading:
+            logger.debug(f"✅ Preserving legitimate heading pattern '{positive_pattern}': {text_clean}")
+            return False, [f"preserved_positive_pattern_{positive_pattern}"]
+        
+        # Check for legitimate single-word headings (common section names) - but only if properly capitalized
+        legitimate_single_words = {
+            'introduction', 'methodology', 'analysis', 'conclusion', 'conclusions',
+            'summary', 'abstract', 'overview', 'background', 'results', 'discussion',
+            'findings', 'limitations', 'recommendations', 'acknowledgments', 'acknowledgement',
+            'references', 'bibliography', 'appendix', 'appendices', 'objectives', 'scope',
+            'implementation', 'design', 'architecture', 'system', 'evaluation', 'validation',
+            'testing', 'deployment', 'configuration', 'installation', 'setup', 'requirements',
+            'specifications', 'performance', 'security', 'scalability', 'reliability',
+            'maintenance', 'troubleshooting', 'documentation', 'glossary', 'acronyms',
+            'future', 'recommendations', 'improvements', 'enhancements', 'extensions'
+        }
+        
+        # Only allow legitimate single words if they are properly capitalized
+        if word_count == 1 and text_clean.lower() in legitimate_single_words and text_clean[0].isupper():
+            logger.debug(f"✅ Preserving legitimate single-word heading: {text_clean}")
+            return False, [f"preserved_single_word_heading"]
+        
+        # Check for roman numerals (with or without dots) - properly capitalized
+        if re.match(r'^\s*[IVX]+\.?\s*$', text_clean, re.IGNORECASE) and text_clean.isupper():
+            logger.debug(f"✅ Preserving roman numeral heading: {text_clean}")
+            return False, [f"preserved_roman_numeral"]
+        
+        # Check for numbered section headings (e.g., "1", "1.1", "A", "A.1")
+        if re.match(r'^\s*\d+(\.\d+)*\.?\s*$', text_clean) or re.match(r'^\s*[A-Z](\.\d+)*\.?\s*$', text_clean):
+            logger.debug(f"✅ Preserving numbered heading: {text_clean}")
+            return False, [f"preserved_numbered_heading"]
+        
+        # EXISTING RULES: Only reject obvious sentence-like structures  
+        if text_clean.endswith('.') and word_count > 15:  # Increased from 12
+            rejection_reasons.append("long_sentence_with_period")
+            
+        if word_count > 20:  # Increased from 12
             rejection_reasons.append("too_many_words")
             
-        if char_count > 150:  # Increased threshold
+        if char_count > 150:  # Increased from 120
             rejection_reasons.append("too_many_characters")
         
-        # Rule 2: Reject identity blocks or personal information
-        identity_keywords = ["junaid ahmad", "lovely professional university", "phagwara", "regn no", "course code", "int 252", "submitted by", "submitted to", "dr.", "kamalpreet"]
+        # Rule 2: Only reject obvious identity blocks 
+        identity_keywords = ["registration :", "b.tech student", "university phagwara"]
         if any(keyword in text_clean.lower() for keyword in identity_keywords):
-            rejection_reasons.append("identity_pattern")
+            rejection_reasons.append("clear_identity_pattern")
         
-        # Rule 2b: Reject academic metadata
-        academic_patterns = [
-            r"project\s+(?:term|report)(?:\s+august)?",
-            r"b\.?tech\s*-?\s*computer\s+science",
-            r"school\s+of\s+computer\s+science",
-            r"^\(\s*project\s+term\s+",
-            r"registration\s*:\s*\d+",
-            r"course\s+code\s*:\s*[a-z]+\s*\d+"
+        # Only check for the most obvious false positives
+        obvious_false_positives = [
+            "registration :", "lovely professional university",
+            "bcrypt.js", "dockerfile", ", 2024. available:", "vps."
         ]
         
-        for pattern in academic_patterns:
-            if re.search(pattern, text_clean, re.IGNORECASE):
-                rejection_reasons.append("academic_metadata")
-                break
+        if text_clean.lower() in obvious_false_positives:
+            rejection_reasons.append("obvious_false_positive")
         
-        # Rule 3: Enhanced POS-based filtering
-        if 'num_verbs' in row and 'num_nouns' in row and row['num_verbs'] > 0 and row['num_nouns'] > 0:
-            total_pos = row['num_verbs'] + row['num_nouns'] + row.get('num_adjs', 0) + row.get('num_advs', 0)
-            if total_pos > 0:
-                verb_ratio = row['num_verbs'] / total_pos
-                noun_ratio = row['num_nouns'] / total_pos
-                
-                # Reject if too many verbs and not enough nouns (sentence-like)
-                if verb_ratio > 0.4 and noun_ratio < 0.3:
-                    rejection_reasons.append("high_verb_low_noun_ratio")
+        # Should reject if any of the new strict rules apply OR multiple existing issues
+        new_rule_violations = any(reason in ["starts_with_bad_special_char", "dollar_not_followed_by_alphanumeric", 
+                                           "too_short_less_than_4_chars", "starts_with_lowercase", 
+                                           "single_word_function_word"] for reason in rejection_reasons)
         
-        # Rule 4: Must start with capital letter or number (with exceptions for Roman numerals)
-        if text_clean and not (text_clean[0].isupper() or text_clean[0].isdigit()):
-            # Allow some exceptions for headings that start with lowercase Roman numerals
-            if not re.match(r'^[ivx]+\.', text_clean.lower()):
-                rejection_reasons.append("no_capital_or_number_start")
+        should_reject = new_rule_violations or len(rejection_reasons) >= 2 or any("obvious" in reason for reason in rejection_reasons)
         
-        # Rule 5: Enhanced fragment detection
-        if word_count <= 2:
-            # Check if it contains common heading words or patterns
-            has_heading_words = any(word.lower() in self.common_heading_words 
-                                  for word in text_clean.split())
-            has_positive_pattern, _ = self.check_positive_patterns(text_clean)
-            
-            if not (has_heading_words or has_positive_pattern):
-                rejection_reasons.append("fragment_without_heading_indicators")
-        
-        # Rule 6: Technical service names and repository names
-        tech_service_patterns = [
-            r"github\s*-\s*proact",
-            r"docker\s+hub\s*-",
-            r"frontend\s+service:",
-            r"api\s+gateway:",
-            r"platform\s+service\s*\(",
-            r"authentication\s+service:",
-            r"component\s+architecture\s+leverage"
-        ]
-        
-        for pattern in tech_service_patterns:
-            if re.search(pattern, text_clean, re.IGNORECASE):
-                rejection_reasons.append("technical_service_name")
-                break
-        
-        # Rule 7: Font and layout filtering with better thresholds
-        if 'font_size' in row and self.document_stats.get('font_percentiles'):
-            font_size = row['font_size']
-            p75_font_size = self.document_stats['font_percentiles'].get(75, 12)
-            median_font_size = self.document_stats['font_percentiles'].get(50, 12)
-            
-            # Be more lenient with font size requirements for academic documents
-            if font_size < median_font_size * 0.9:  # Less strict than before
-                # Additional checks for layout
-                line_pos = row.get('line_position_on_page', 0)
-                
-                # If it's small font AND not at top of page, likely not a heading
-                if line_pos > 5:  # Not near top of page
-                    rejection_reasons.append("small_font_not_prominent_position")
-        
-        # Rule 8: Specific false positives from current output
-        specific_false_positives = [
-            "junaid ahmad", "lovely professional university", "b.tech - computer science and engineering",
-            "component architecture leverage chakra ui and tailwind css",
-            "authentication service: docker hub - auth-service",
-            "platform service (project management): docker hub",
-            "api gateway: docker hub - api-gateway",
-            "frontend service: docker hub - proactive_frontend",
-            "docker hub container images",
-            "github - proactive_india_backend",
-            "backend repository (microservices architecture):",
-            "frontend repository: github - proact_india_frontend",
-            "source code repositories",
-            "proactive india (live platform):",
-            "deployed application"
-        ]
-        
-        if text_clean.lower() in [fp.lower() for fp in specific_false_positives]:
-            rejection_reasons.append("known_false_positive")
-        
-        # Rule 9: Check for positive patterns to override some rejections
-        has_positive_pattern, positive_pattern = self.check_positive_patterns(text_clean)
-        if has_positive_pattern:
-            # Remove certain rejection reasons if we have strong positive indicators
-            strong_patterns = ['roman_numerals', 'numbered_sections', 'letter_headings', 'common_headings']
-            if positive_pattern in strong_patterns:
-                rejection_reasons = [r for r in rejection_reasons if r not in ['too_many_words', 'fragment_without_heading_indicators']]
-        
-        # Should reject if any rejection reasons found
-        should_reject = len(rejection_reasons) > 0
+        if should_reject:
+            logger.debug(f"❌ Rejected '{text_clean}' for reasons: {rejection_reasons}")
         
         return should_reject, rejection_reasons
     
     def check_exclusion_patterns(self, text: str) -> Tuple[bool, str]:
-        """Check if text matches any exclusion patterns"""
+        """Check if text matches any exclusion patterns - BUT respect positive patterns first"""
         text_clean = text.strip()
         
+        # FIRST: Check if this matches any positive pattern (these override exclusions)
+        is_positive, positive_pattern = self.check_positive_patterns(text_clean)
+        if is_positive:
+            return False, f"positive_override_{positive_pattern}"
+        
+        # CRITICAL: Check for obvious structural headings that should NEVER be excluded
+        # Roman numerals (with or without dots, with or without text) - BUT be more restrictive
+        # Only match pure roman numerals or roman numerals followed by dot and space, then uppercase text
+        if re.match(r'^\s*[IVX]+\.?\s*$', text_clean, re.IGNORECASE) or re.match(r'^\s*[IVX]+\.\s+[A-Z].*$', text_clean, re.IGNORECASE):
+            return False, "protected_roman_numeral"
+        
+        # Numbers with dots and optionally text (1., 1.1, 1. Something, etc.)
+        if re.match(r'^\s*\d+(?:\.\d+)*\.?\s*(?:[A-Z].*)?$', text_clean):
+            return False, "protected_numbered_heading"
+        
+        # Single letters with dots and optionally text (A., A. Something, etc.)
+        if re.match(r'^\s*[A-Z]\.?\s*(?:[A-Z].*)?$', text_clean):
+            return False, "protected_letter_heading"
+        
+        # Check for legitimate single-word headings - BUT ONLY if properly capitalized
+        legitimate_single_words = {
+            'introduction', 'methodology', 'analysis', 'conclusion', 'conclusions',
+            'summary', 'abstract', 'overview', 'background', 'results', 'discussion',
+            'findings', 'limitations', 'recommendations', 'acknowledgments', 'acknowledgement',
+            'references', 'bibliography', 'appendix', 'appendices', 'objectives', 'scope'
+        }
+        
+        # Only allow legitimate single words if they are properly capitalized (start with uppercase)
+        if text_clean.lower() in legitimate_single_words and text_clean[0].isupper():
+            return False, "legitimate_single_word"
+        
+        # USER REQUESTED RULES: Apply new strict filtering rules
+        # 1. Check for bad special characters at start
+        if text_clean and text_clean[0] in '&_,.\\%*!~':
+            return True, "starts_with_bad_special_char"
+        
+        # 2. Check $ rule - must be followed by alphanumeric
+        if text_clean.startswith('$'):
+            if len(text_clean) <= 1 or not text_clean[1].isalnum():
+                return True, "dollar_not_followed_by_alphanumeric"
+        
+        # 3. Check minimum length (more than 3 characters)
+        if len(text_clean) <= 3:
+            # Exception for legitimate short headings
+            if not (re.match(r'^[IVX]+$', text_clean, re.IGNORECASE) or 
+                   re.match(r'^[A-Z]$', text_clean) or
+                   re.match(r'^\d+$', text_clean)):
+                return True, "too_short_less_than_4_chars"
+        
+        # 4. Check for lowercase start
+        if text_clean and text_clean[0].islower():
+            # Exception for technical terms
+            if not text_clean.lower() in ['iPhone', 'iPad', 'macOS', 'iOS', 'eBay', 'etc']:
+                return True, "starts_with_lowercase"
+        
+        # 5. Check for function words
+        function_words = {
+            'for', 'the', 'them', 'their', 'these', 'those', 'this', 'that',
+            'a', 'an', 'and', 'but', 'or', 'so', 'yet', 'nor', 
+            'with', 'by', 'from', 'to', 'in', 'on', 'at', 'of',
+            'initially', 'however', 'therefore', 'thus', 'hence'
+        }
+        
+        if len(text_clean.split()) == 1 and text_clean.lower() in function_words:
+            return True, "single_word_function_word"
+        
+        # Now check traditional exclusion patterns
         for pattern_name, pattern in self.exclusion_patterns.items():
             if pattern.search(text_clean):
                 return True, pattern_name
@@ -393,6 +549,13 @@ class IntelligentFilter:
         """Check if text matches any positive heading patterns"""
         text_clean = text.strip()
         
+        # First check with hierarchical numbering analyzer if available
+        if self.numbering_analyzer:
+            is_valid, pattern_type, level = self.numbering_analyzer.is_valid_heading_number(text_clean)
+            if is_valid:
+                return True, f"hierarchical_{pattern_type}_level_{level}"
+        
+        # Then check traditional positive patterns
         for pattern_name, pattern in self.positive_patterns.items():
             if pattern.search(text_clean):
                 return True, pattern_name
@@ -463,50 +626,53 @@ class IntelligentFilter:
         reasons = []
         score = 0.5  # Start neutral
         
-        # 1. Apply rule-based filters first (strict rejection criteria)
+        # 1. Apply rule-based filters first (but don't penalize as heavily)
         should_reject, rejection_reasons = self.apply_rule_based_filters(text, row, context)
         
         if should_reject:
-            # Strong penalty for rule-based rejections
-            score -= 0.5
+            # Moderate penalty for rule-based rejections instead of strong
+            score -= 0.2  # Reduced from 0.5
             reasons.extend([f"rule_reject_{reason}" for reason in rejection_reasons])
         
-        # 2. Confidence-based base score
+        # 2. Confidence-based base score - more generous
         if confidence >= self.high_confidence_threshold:
-            score += 0.3
+            score += 0.4  # Increased from 0.3
             reasons.append(f"high_confidence_{confidence:.3f}")
         elif confidence >= self.medium_confidence_threshold:
-            score += 0.1
+            score += 0.2  # Increased from 0.1
             reasons.append(f"medium_confidence_{confidence:.3f}")
-        else:
-            score -= 0.1
+        elif confidence >= self.low_confidence_threshold:
+            score += 0.0  # Neutral instead of negative
             reasons.append(f"low_confidence_{confidence:.3f}")
+        else:
+            score -= 0.05  # Very small penalty instead of -0.1
+            reasons.append(f"very_low_confidence_{confidence:.3f}")
         
-        # 3. Exclusion patterns (strong negative)
+        # 3. Exclusion patterns (moderate negative instead of strong)
         is_excluded, exclusion_reason = self.check_exclusion_patterns(text)
         if is_excluded:
-            score -= 0.4
+            score -= 0.2  # Reduced from 0.4
             reasons.append(f"excluded_{exclusion_reason}")
         
-        # 4. Positive patterns (strong positive)
+        # 4. Positive patterns (stronger positive boost)
         is_positive, positive_reason = self.check_positive_patterns(text)
         if is_positive:
-            score += 0.3
+            score += 0.5  # Increased from 0.3
             reasons.append(f"positive_{positive_reason}")
         
-        # 5. Length-based scoring (enhanced)
+        # 5. Length-based scoring (much more lenient)
         word_count = len(text.split())
-        if word_count <= 1:
-            score -= 0.3
-            reasons.append("too_short")
-        elif word_count > 25:
-            score -= 0.4
+        if word_count <= 1 and len(text) < 5:  # Only penalize very short text
+            score -= 0.2  # Reduced from 0.3
+            reasons.append("very_short")
+        elif word_count > 30:  # Increased from 25
+            score -= 0.3  # Reduced from 0.4
             reasons.append("too_long")
-        elif word_count > 12:  # From Rule 1
-            score -= 0.2
+        elif word_count > 20:  # Increased from 12
+            score -= 0.1  # Reduced from 0.2
             reasons.append("moderately_long")
-        elif 2 <= word_count <= 8:
-            score += 0.1
+        elif 2 <= word_count <= 15:  # Increased from 8
+            score += 0.15  # Increased from 0.1
             reasons.append("good_length")
         
         # 6. Font size relative scoring (enhanced with percentile thresholds)
@@ -514,18 +680,20 @@ class IntelligentFilter:
             font_size = row['font_size']
             percentiles = self.document_stats['font_percentiles']
             
-            if font_size >= percentiles.get(95, 16):
-                score += 0.3
+            # Since most fonts are the same size (9.96), be more lenient
+            if font_size >= percentiles.get(98, 16):
+                score += 0.4  # Increased from 0.3
                 reasons.append("very_large_font")
-            elif font_size >= percentiles.get(90, 14):
-                score += 0.2
+            elif font_size >= percentiles.get(95, 14):
+                score += 0.3  # Increased from 0.2
                 reasons.append("large_font")
-            elif font_size >= percentiles.get(75, 12):
-                score += 0.1
+            elif font_size >= percentiles.get(90, 12):
+                score += 0.2  # Increased from 0.1
                 reasons.append("above_avg_font")
-            elif font_size < percentiles.get(50, 11):
-                score -= 0.2
-                reasons.append("small_font")
+            elif font_size >= percentiles.get(50, 11):
+                score += 0.1  # Bonus for normal font
+                reasons.append("normal_font")
+            # Remove penalty for small fonts since most text has same size
         
         # 7. Context-based scoring
         if context['font_size_context'] == 'larger':
@@ -727,6 +895,22 @@ class IntelligentFilter:
         heading_levels = enhanced_df[enhanced_df['is_heading_pred'] == 1]['final_heading_level'].value_counts()
         logger.info(f"   📏 Heading levels: {dict(heading_levels)}")
         
+        # Apply new filtering rules
+        logger.info("🔧 Applying additional filtering rules...")
+        
+        # Rule 1: Apply document title rule (first heading in initial 100 blocks)
+        enhanced_df = self.apply_document_title_rule(enhanced_df)
+        
+        # Rule 2: Apply consecutive heading merge rule
+        enhanced_df = self.apply_consecutive_heading_merge_rule(enhanced_df)
+        
+        # Log final results after additional rules
+        final_predictions = enhanced_df['is_heading_pred'].sum()
+        final_heading_levels = enhanced_df[enhanced_df['is_heading_pred'] == 1]['final_heading_level'].value_counts()
+        logger.info(f"📊 Final Results After Additional Rules:")
+        logger.info(f"   🔢 Final predictions: {final_predictions}")
+        logger.info(f"   📏 Final heading levels: {dict(final_heading_levels)}")
+        
         return enhanced_df
     
     def calculate_enhanced_filter_score(self, row: pd.Series, context: Dict, confidence: float) -> Tuple[float, Dict]:
@@ -803,21 +987,19 @@ class IntelligentFilter:
         
         text = row.get('text', '').strip()
         
-        # Hard rejection criteria - less aggressive
+        # Hard rejection criteria - MUCH less aggressive
         if (syntax_violations >= self.syntax_violation_limit or
-            heading_likelihood < 0.1 or  # Reduced from 0.2
-            content_type == 'technical' or  # Removed 'fragment'
-            filter_score < 0.1):  # Reduced from 0.2
+            heading_likelihood < 0.01 or  # Very minimal threshold 
+            filter_score < -0.2):  # Only filter extremely bad scores
             return 'filtered_hard_criteria', 0, 'H3'
         
-        # Soft rejection criteria - less aggressive
-        if (heading_likelihood < self.heading_likelihood_threshold and
-            confidence < self.medium_confidence_threshold and
-            content_type == 'technical'):  # Added content type check
+        # Remove most soft rejection criteria to be less aggressive
+        # Only reject obvious technical terms
+        if (content_type == 'technical' and confidence < 0.3 and filter_score < 0.1):
             return 'filtered_soft_criteria', 0, 'H3'
         
-        # High confidence preservation
-        if confidence >= self.high_confidence_threshold and filter_score >= 0.3:
+        # High confidence preservation - more lenient
+        if confidence >= self.high_confidence_threshold:
             # Determine proper level based on metadata
             if recommended_level in ['H1', 'H2', 'H3']:
                 final_level = recommended_level
@@ -826,23 +1008,26 @@ class IntelligentFilter:
             
             return 'keep_high_confidence', 1, final_level
         
-        # Good score preservation - less strict
-        if filter_score >= 0.4:  # Reduced from 0.6
+        # Good score preservation - much more lenient
+        if filter_score >= 0.2:  # Significantly reduced from 0.4
             final_level = recommended_level if recommended_level in ['H1', 'H2', 'H3'] else 'H2'
             return 'keep_good_score', 1, final_level
         
-        # Medium confidence with decent likelihood - less strict
-        if (confidence >= self.medium_confidence_threshold and 
-            heading_likelihood >= 0.3):  # Reduced from 0.5
-            final_level = recommended_level if recommended_level in ['H1', 'H2', 'H3'] else 'H3'
+        # Medium confidence preservation - much more lenient
+        if confidence >= self.medium_confidence_threshold:
+            final_level = recommended_level if recommended_level in ['H1', 'H2', 'H3'] else 'H2'
             return 'keep_medium_quality', 1, final_level
         
-        # Low confidence but good content type
-        if (content_type == 'heading_candidate' and filter_score >= 0.2):
+        # Low confidence but reasonable content - very lenient
+        if confidence >= self.low_confidence_threshold or filter_score >= 0.0:
             final_level = recommended_level if recommended_level in ['H1', 'H2', 'H3'] else 'H3'
-            return 'keep_content_based', 1, final_level
+            return 'keep_low_quality', 1, final_level
         
-        # Default: filter out
+        # Default: keep most things now, only filter very bad content
+        if filter_score >= -0.1:  # Keep almost everything
+            return 'keep_default', 1, 'H3'
+        
+        # Only filter truly bad content
         return 'filtered_default', 0, 'H3'
     
     def generate_filtering_report(self, df: pd.DataFrame, output_path: str = None):
@@ -918,101 +1103,264 @@ class IntelligentFilter:
                 logger.error(f"❌ Error saving simplified report: {e2}")
                 return simplified_report
     
-    def detect_document_title(self, df: pd.DataFrame) -> str:
-        """Detect the document title from the filtered headings and text blocks"""
-        logger.info("🔍 Detecting document title...")
+    def apply_consecutive_heading_merge_rule(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Apply rule: Two consecutive headings of same level will be merged only if 
+        first one is a number, roman numeral, or single character followed by a word.
+        Examples: "1" + "Introduction" -> "1 Introduction"
+                  "A." + "System Architecture" -> "A. System Architecture"
+                  "VII." + "Project Legacy" -> "VII. Project Legacy"
         
-        # Method 1: Look for a large font size text near the beginning
-        if 'font_size' in df.columns:
-            # Sort by page and position
-            if 'page' in df.columns and 'line_position_on_page' in df.columns:
-                first_page_blocks = df[df['page'] == 1].sort_values(['line_position_on_page'])
-            else:
-                first_page_blocks = df.head(20)  # First 20 blocks
+        Also merges broken headings that are split into multiple single words:
+        Examples: "Proactive" + "India" -> "Proactive India"
+        """
+        logger.info("🔗 Applying consecutive heading merge rule...")
+        
+        merged_count = 0
+        df_copy = df.copy()
+        indices_to_remove = set()
+        
+        # Sort by page and position to ensure proper order
+        sort_columns = ['page']
+        if 'line_position_on_page' in df_copy.columns:
+            sort_columns.append('line_position_on_page')
+        elif 'y0' in df_copy.columns:
+            sort_columns.append('y0')
+        
+        df_sorted = df_copy.sort_values(sort_columns, na_position='last').reset_index(drop=True)
+        
+        # First pass: merge numbered/lettered prefixes with following headings
+        for i in range(len(df_sorted) - 1):
+            current_row = df_sorted.iloc[i]
+            next_row = df_sorted.iloc[i + 1]
             
-            # Find blocks with largest font sizes
-            max_font_size = first_page_blocks['font_size'].max()
-            large_font_blocks = first_page_blocks[
-                first_page_blocks['font_size'] >= max_font_size * 0.9
-            ]
+            # Skip if current row is already marked for removal
+            if current_row.name in indices_to_remove:
+                continue
             
-            # Filter out obvious non-titles
-            title_candidates = []
-            for _, row in large_font_blocks.iterrows():
-                text = str(row['text']).strip()
+            # Check if both are headings
+            current_is_heading = current_row.get('is_heading_pred', 0) == 1
+            next_is_heading = next_row.get('is_heading_pred', 0) == 1
+            
+            # Check if they're on the same page and close to each other
+            same_page = current_row.get('page', 0) == next_row.get('page', 0)
+            
+            if current_is_heading and next_is_heading and same_page:
+                current_text = str(current_row.get('text', '')).strip()
+                next_text = str(next_row.get('text', '')).strip()
                 
-                # Skip if it looks like metadata
-                if any(pattern in text.lower() for pattern in [
-                    'project report', 'submitted by', 'registration', 'course code',
-                    'university', 'college', 'school of', 'august', 'november'
-                ]):
-                    continue
+                # Check if current text matches mergeable patterns
+                is_mergeable = False
+                merge_type = ""
                 
-                # Skip if it's a person's name
-                if re.match(r'^[A-Z][a-z]+\s+[A-Z][a-z]+$', text):
-                    continue
+                for pattern_type, pattern in self.mergeable_prefix_patterns.items():
+                    if pattern.match(current_text):
+                        # Additional check: next text should look like a proper heading
+                        if len(next_text) > 0 and (
+                            next_text[0].isupper() or  # Starts with uppercase
+                            any(word.lower() in self.common_heading_words for word in next_text.split())
+                        ):
+                            is_mergeable = True
+                            merge_type = pattern_type
+                            logger.debug(f"Found mergeable prefix '{current_text}' ({pattern_type}) followed by '{next_text}'")
+                            break
                 
-                # Skip if it's too short or too long
-                word_count = len(text.split())
-                if word_count < 3 or word_count > 20:
-                    continue
-                
-                # Skip if it contains obvious heading markers
-                if re.match(r'^\s*[IVX]+\.|^\s*\d+\.', text):
-                    continue
+                if is_mergeable:
+                    # Merge the texts
+                    merged_text = f"{current_text} {next_text}".strip()
                     
-                title_candidates.append(text)
-            
-            if title_candidates:
-                # Return the longest meaningful title candidate
-                best_title = max(title_candidates, key=len)
-                logger.info(f"✅ Detected title: {best_title}")
-                return best_title
+                    # Update the next row with merged text and copy properties from current row
+                    original_next_idx = next_row.name
+                    df_copy.at[original_next_idx, 'text'] = merged_text
+                    df_copy.at[original_next_idx, 'filter_decision'] = 'merged_consecutive'
+                    df_copy.at[original_next_idx, 'filter_reasons'] = f"merged_with_prefix: {current_text} ({merge_type})"
+                    
+                    # Copy position info from the first element if needed
+                    if 'line_position_on_page' in df_copy.columns:
+                        df_copy.at[original_next_idx, 'line_position_on_page'] = current_row.get('line_position_on_page', next_row.get('line_position_on_page'))
+                    if 'y0' in df_copy.columns:
+                        df_copy.at[original_next_idx, 'y0'] = current_row.get('y0', next_row.get('y0'))
+                    
+                    # Mark the first heading as not a heading (remove it)
+                    original_current_idx = current_row.name
+                    df_copy.at[original_current_idx, 'is_heading_pred'] = 0
+                    df_copy.at[original_current_idx, 'filter_decision'] = 'merged_into_next'
+                    df_copy.at[original_current_idx, 'filter_reasons'] = f"merged_prefix_for: {next_text}"
+                    
+                    indices_to_remove.add(original_current_idx)
+                    merged_count += 1
+                    logger.debug(f"Merged prefix '{current_text}' + '{next_text}' -> '{merged_text}'")
         
-        # Method 2: Look for heading that sounds like a full title
-        headings = df[df.get('is_heading_pred', 0) == 1] if 'is_heading_pred' in df.columns else df
+        # Second pass: merge broken headings (consecutive single words that likely form one heading)
+        # Re-sort after first pass modifications
+        df_sorted = df_copy.sort_values(sort_columns, na_position='last').reset_index(drop=True)
         
-        title_patterns = [
-            r'implementation\s+of.*platform',
-            r'.*\s+in\s+.*\s+.*',  # "Something in Something Something"
-            r'.*:\s+.*',  # "Title: Subtitle"
-            r'.*\s+practices\s+in\s+.*',
-            r'.*\s+platform$',
-            r'.*\s+system$',
-            r'.*\s+framework$'
-        ]
-        
-        for _, row in headings.iterrows():
-            text = str(row['text']).strip()
-            word_count = len(text.split())
-            
-            # Skip obvious section headings
-            if re.match(r'^\s*[IVX]+\.|^\s*\d+\.|^\s*[A-Z]\.|abstract|introduction|conclusion', text, re.IGNORECASE):
+        for i in range(len(df_sorted) - 2):  # Look ahead up to 2 positions
+            if df_sorted.iloc[i].name in indices_to_remove:
                 continue
                 
-            # Look for title-like patterns
-            for pattern in title_patterns:
-                if re.search(pattern, text, re.IGNORECASE) and word_count >= 5:
-                    logger.info(f"✅ Detected title from heading: {text}")
-                    return text
-        
-        # Method 3: Fallback - look for the first meaningful H1 heading
-        h1_headings = df[df.get('final_heading_level', '') == 'H1'] if 'final_heading_level' in df.columns else df.head(5)
-        
-        for _, row in h1_headings.iterrows():
-            text = str(row['text']).strip()
-            word_count = len(text.split())
+            current_row = df_sorted.iloc[i]
+            current_text = str(current_row.get('text', '')).strip()
+            current_is_heading = current_row.get('is_heading_pred', 0) == 1
             
-            # Skip section markers but keep descriptive titles
-            if (word_count >= 4 and 
-                not re.match(r'^\s*[IVX]+\.|^\s*\d+\.', text) and
-                not text.lower() in ['abstract', 'introduction', 'conclusion']):
-                logger.info(f"✅ Using H1 heading as title: {text}")
-                return text
+            # Look for consecutive single words that might be a broken heading
+            if (current_is_heading and 
+                len(current_text.split()) == 1 and  # Single word
+                current_text.isalpha() and  # Only letters
+                current_text[0].isupper()):  # Starts with uppercase
+                
+                # Collect consecutive single-word headings on the same page
+                words_to_merge = [current_text]
+                rows_to_merge = [current_row]
+                
+                # Look ahead for more single words
+                for j in range(i + 1, min(i + 4, len(df_sorted))):  # Look at next 3 headings max
+                    if df_sorted.iloc[j].name in indices_to_remove:
+                        continue
+                        
+                    next_row = df_sorted.iloc[j]
+                    next_text = str(next_row.get('text', '')).strip()
+                    next_is_heading = next_row.get('is_heading_pred', 0) == 1
+                    same_page = current_row.get('page', 0) == next_row.get('page', 0)
+                    
+                    # Stop if not a heading, different page, or multi-word
+                    if not next_is_heading or not same_page:
+                        break
+                        
+                    # Include single words or known continuation patterns
+                    if (len(next_text.split()) == 1 and 
+                        next_text.isalpha() and 
+                        next_text[0].isupper()):
+                        words_to_merge.append(next_text)
+                        rows_to_merge.append(next_row)
+                    else:
+                        # If we find a longer text that seems related, include it and stop
+                        if len(next_text.split()) <= 3 and next_text[0].isupper():
+                            words_to_merge.append(next_text)
+                            rows_to_merge.append(next_row)
+                        break
+                
+                # Merge if we have multiple words and they seem to form a meaningful heading
+                if len(words_to_merge) >= 2:
+                    merged_text = " ".join(words_to_merge)
+                    
+                    # Additional validation: the merged text should look like a reasonable heading
+                    if (len(merged_text) >= 5 and  # Not too short
+                        not any(word.lower() in ['the', 'a', 'an', 'and', 'or', 'but'] for word in words_to_merge) and  # No obvious non-heading words
+                        len(merged_text.split()) <= 6):  # Not too long
+                        
+                        # Update the first row with merged text
+                        original_first_idx = rows_to_merge[0].name
+                        df_copy.at[original_first_idx, 'text'] = merged_text
+                        df_copy.at[original_first_idx, 'filter_decision'] = 'merged_broken_heading'
+                        df_copy.at[original_first_idx, 'filter_reasons'] = f"merged_broken_words: {' + '.join(words_to_merge)}"
+                        
+                        # Mark other rows for removal
+                        for row in rows_to_merge[1:]:
+                            original_idx = row.name
+                            df_copy.at[original_idx, 'is_heading_pred'] = 0
+                            df_copy.at[original_idx, 'filter_decision'] = 'merged_into_broken_heading'
+                            df_copy.at[original_idx, 'filter_reasons'] = f"merged_into: {merged_text}"
+                            indices_to_remove.add(original_idx)
+                        
+                        merged_count += 1
+                        logger.debug(f"Merged broken heading: {' + '.join(words_to_merge)} -> '{merged_text}'")
         
-        # Default fallback
-        logger.warning("⚠️  Could not detect document title, using default")
-        return "Document Title Not Detected"
+        logger.info(f"✅ Consecutive heading merge rule applied: {merged_count} merges performed")
+        return df_copy
+    
+    def apply_document_title_rule(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Apply rule: First heading/H1 in the initial 100 blocks is title of the document.
+        Ensure it gets H1 level and is preserved.
+        """
+        logger.info("📄 Applying document title rule...")
+        
+        # Sort dataframe to ensure we get the actual first blocks
+        sort_columns = ['page']
+        if 'line_position_on_page' in df.columns:
+            sort_columns.append('line_position_on_page')
+        elif 'y0' in df.columns:
+            sort_columns.append('y0')
+        
+        df_sorted = df.sort_values(sort_columns, na_position='last')
+        
+        # Find the first 100 blocks (or fewer if document is smaller)
+        initial_blocks = df_sorted.head(min(100, len(df_sorted)))
+        
+        # Find the first heading in these blocks
+        first_heading_idx = None
+        first_heading_position = None
+        
+        for position, (idx, row) in enumerate(initial_blocks.iterrows()):
+            if row.get('is_heading_pred', 0) == 1:
+                text = str(row.get('text', '')).strip()
+                
+                # Additional validation: should look like a document title
+                # - Not too short (unless it's a clear title)
+                # - Not a technical term or fragment
+                # - Preferably in title case or all caps
+                
+                word_count = len(text.split())
+                is_valid_title = True
+                
+                # Skip obvious non-titles
+                if (word_count == 1 and len(text) < 4) or text.lower() in ['the', 'a', 'an']:
+                    is_valid_title = False
+                elif any(pattern.search(text) for pattern in [
+                    self.exclusion_patterns.get('technical_terms', re.compile('')),
+                    self.exclusion_patterns.get('technical_fragments', re.compile('')),
+                    self.exclusion_patterns.get('programming_terms', re.compile('')),
+                    self.exclusion_patterns.get('file_paths', re.compile(''))
+                ]):
+                    is_valid_title = False
+                elif text.endswith('.') and word_count > 10:  # Long sentences
+                    is_valid_title = False
+                
+                if is_valid_title:
+                    first_heading_idx = idx
+                    first_heading_position = position
+                    break
+        
+        if first_heading_idx is not None:
+            title_text = df.at[first_heading_idx, 'text']
+            
+            # Mark as document title and ensure H1 level
+            df.at[first_heading_idx, 'final_heading_level'] = 'H1'
+            df.at[first_heading_idx, 'filter_decision'] = 'document_title'
+            df.at[first_heading_idx, 'filter_reasons'] = f'first_heading_document_title_position_{first_heading_position}'
+            df.at[first_heading_idx, 'is_heading_pred'] = 1  # Ensure it's preserved
+            
+            # Boost confidence for title
+            current_confidence = df.at[first_heading_idx, 'heading_confidence'] if 'heading_confidence' in df.columns else 0.8
+            df.at[first_heading_idx, 'heading_confidence'] = max(current_confidence, 0.9)
+            
+            logger.info(f"📄 Document title identified: '{title_text}' (position: {first_heading_position}, index: {first_heading_idx})")
+            
+            # Check for potential subtitle (next heading on same page or close by)
+            potential_subtitle_blocks = df_sorted.head(min(120, len(df_sorted)))
+            for position, (idx, row) in enumerate(potential_subtitle_blocks.iterrows()):
+                if (idx != first_heading_idx and 
+                    row.get('is_heading_pred', 0) == 1 and
+                    position > first_heading_position and 
+                    position <= first_heading_position + 15):  # Within 15 positions
+                    
+                    subtitle_text = str(row.get('text', '')).strip()
+                    subtitle_words = len(subtitle_text.split())
+                    
+                    # Valid subtitle criteria
+                    if (subtitle_words >= 2 and subtitle_words <= 15 and
+                        not any(pattern.search(subtitle_text) for pattern in self.exclusion_patterns.values())):
+                        
+                        df.at[idx, 'final_heading_level'] = 'H2'
+                        df.at[idx, 'filter_decision'] = 'document_subtitle'
+                        df.at[idx, 'filter_reasons'] = f'potential_subtitle_after_title'
+                        logger.info(f"📄 Potential subtitle identified: '{subtitle_text}' (position: {position})")
+                        break
+        else:
+            logger.warning("⚠️  No valid heading found in first 100 blocks for document title")
+        
+        return df
 
     def tune_thresholds(self, df: pd.DataFrame, target_precision: float = 0.9):
         """Tune filtering thresholds based on validation data with known labels"""

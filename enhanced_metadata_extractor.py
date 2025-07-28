@@ -212,7 +212,7 @@ class EnhancedMetadataExtractor:
         return df
     
     def _analyze_linguistics(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Analyze linguistic characteristics (simplified implementation)"""
+        """Analyze linguistic characteristics"""
         logger.info("🔤 Analyzing linguistic characteristics...")
         
         # Initialize linguistic features
@@ -220,6 +220,24 @@ class EnhancedMetadataExtractor:
         df['pos_heading_score'] = 0
         df['syntax_violations'] = 0
         df['linguistic_patterns'] = ''
+        
+        # Try to load spaCy for advanced analysis
+        try:
+            import spacy
+            from spacy.lang.en import English
+            
+            # Try to load full model, fallback to basic
+            try:
+                nlp = spacy.load("en_core_web_sm")
+            except OSError:
+                logger.warning("Full spaCy model not available, using basic tokenizer")
+                nlp = English()
+                nlp.add_pipe('sentencizer')
+            
+            has_spacy = True
+        except ImportError:
+            logger.warning("spaCy not available, using rule-based linguistic analysis")
+            has_spacy = False
         
         for idx, row in df.iterrows():
             text = str(row.get('text', ''))
@@ -230,167 +248,123 @@ class EnhancedMetadataExtractor:
             patterns = []
             violations = 0
             
-            # Basic linguistic analysis
+            # Basic text analysis
             words = text.split()
             word_count = len(words)
             
-            # POS-based analysis using existing features if available
-            if 'num_nouns' in row and 'num_verbs' in row:
-                total_words = row.get('num_nouns', 0) + row.get('num_verbs', 0) + row.get('num_adjs', 0)
-                if total_words > 0:
-                    noun_ratio = row.get('num_nouns', 0) / total_words
-                    verb_ratio = row.get('num_verbs', 0) / total_words
-                    
-                    # Good heading pattern: high noun ratio, low verb ratio
-                    if noun_ratio > 0.5:
-                        linguistic_score += 2
-                        patterns.append('high_noun_ratio')
-                    if verb_ratio > 0.3:
-                        violations += 1
-                        patterns.append('high_verb_ratio')
-            
-            # Pattern-based violations
-            if text.endswith('.') and word_count > 3:
-                violations += 1
-                patterns.append('sentence_ending')
-            
-            if word_count > 15:
-                violations += 1
+            # Length analysis - less aggressive
+            if 1 <= word_count <= 8:
+                linguistic_score += 2
+                patterns.append('good_length')
+            elif word_count > 20:  # Increased threshold
+                violations += 1  # Reduced from 2
                 patterns.append('too_long')
             
-            if text.lower().startswith(('the ', 'this ', 'these ', 'it ', 'initially')):
+            # Case analysis - less aggressive
+            if text.isupper() and word_count > 8:  # Increased threshold
                 violations += 1
-                patterns.append('article_start')
+                patterns.append('excessive_caps')
+            elif text.istitle():
+                linguistic_score += 1
+                patterns.append('title_case')
+            elif text[0].isupper() if text else False:
+                linguistic_score += 0.5
+                patterns.append('capital_start')
+            elif text[0].islower() if text else False:
+                violations += 1  # Reduced from 2
+                patterns.append('lowercase_start')
             
-            df.at[idx, 'linguistic_score'] = linguistic_score
-            df.at[idx, 'syntax_violations'] = violations
+            # Punctuation analysis - less aggressive
+            if text.endswith(('.', '!', '?')):
+                violations += 1  # Reduced from 2
+                patterns.append('sentence_ending')
+            elif text.endswith(':'):
+                linguistic_score += 1
+                patterns.append('colon_ending')
+            elif text.endswith(','):
+                violations += 1
+                patterns.append('comma_ending')
+            
+            # Anti-pattern detection - less aggressive for headings
+            for category, pattern_list in self.anti_heading_patterns.items():
+                for pattern in pattern_list:
+                    if re.match(pattern, text, re.IGNORECASE):
+                        # Reduce violations based on category
+                        if category in ['sentence_fragments', 'incomplete_phrases']:
+                            violations += 1  # Reduced from 3
+                        elif category in ['technical_terms', 'list_items']:
+                            violations += 2  # Reduced from 3
+                        else:
+                            violations += 3  # Keep high for obvious non-headings
+                        patterns.append(f'anti_{category}')
+                        break
+            
+            # Advanced spaCy analysis
+            pos_score = 0
+            if has_spacy and text.strip():
+                try:
+                    doc = nlp(text)
+                    
+                    # POS analysis
+                    pos_counts = {'favorable': 0, 'neutral': 0, 'unfavorable': 0}
+                    
+                    for token in doc:
+                        if token.pos_ in self.pos_patterns['heading_favorable']:
+                            pos_counts['favorable'] += 1
+                        elif token.pos_ in self.pos_patterns['heading_neutral']:
+                            pos_counts['neutral'] += 1
+                        elif token.pos_ in self.pos_patterns['heading_unfavorable']:
+                            pos_counts['unfavorable'] += 1
+                    
+                    total_tokens = sum(pos_counts.values())
+                    if total_tokens > 0:
+                        favorable_ratio = pos_counts['favorable'] / total_tokens
+                        unfavorable_ratio = pos_counts['unfavorable'] / total_tokens
+                        
+                        pos_score = (favorable_ratio * 2) - (unfavorable_ratio * 2)
+                        
+                        if favorable_ratio > 0.6:
+                            patterns.append('favorable_pos')
+                        elif unfavorable_ratio > 0.4:
+                            patterns.append('unfavorable_pos')
+                            violations += 1
+                    
+                    # Dependency analysis
+                    if len(doc) > 1:
+                        # Check for sentence-like structures
+                        has_subject = any(token.dep_ in ['nsubj', 'nsubjpass'] for token in doc)
+                        has_verb = any(token.pos_ == 'VERB' for token in doc)
+                        
+                        if has_subject and has_verb:
+                            violations += 2
+                            patterns.append('sentence_structure')
+                
+                except Exception as e:
+                    logger.debug(f"spaCy analysis failed for '{text}': {e}")
+            
+            # Store results with proper dtype conversion
+            df.at[idx, 'linguistic_score'] = float(linguistic_score)
+            df.at[idx, 'pos_heading_score'] = float(pos_score)
+            df.at[idx, 'syntax_violations'] = int(violations)
             df.at[idx, 'linguistic_patterns'] = ';'.join(patterns)
         
         return df
     
     def _analyze_positioning(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Analyze positional characteristics (simplified implementation)"""
-        logger.info("📍 Analyzing positional characteristics...")
+        """Analyze positional and contextual characteristics"""
+        logger.info("📍 Analyzing positional and contextual characteristics...")
         
+        # Page-level analysis
         df['position_score'] = 0
-        df['position_patterns'] = ''
-        
-        for idx, row in df.iterrows():
-            score = 0
-            patterns = []
-            
-            # Page position bonus
-            if 'page' in row and row['page'] == 1:
-                score += 1
-                patterns.append('first_page')
-            
-            # Line position bonus
-            if 'line_position_on_page' in row:
-                line_pos = row['line_position_on_page']
-                if line_pos <= 3:
-                    score += 2
-                    patterns.append('top_of_page')
-                elif line_pos <= 10:
-                    score += 1
-                    patterns.append('upper_page')
-            
-            df.at[idx, 'position_score'] = score
-            df.at[idx, 'position_patterns'] = ';'.join(patterns)
-        
-        return df
-    
-    def _analyze_content_semantics(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Analyze content semantics (simplified implementation)"""
-        logger.info("🧠 Analyzing content semantics...")
-        
-        df['semantic_score'] = 0
-        df['content_type'] = 'unknown'
-        df['semantic_patterns'] = ''
-        
-        for idx, row in df.iterrows():
-            text = str(row.get('text', ''))
-            score = 0
-            patterns = []
-            content_type = 'unknown'
-            
-            text_lower = text.lower()
-            
-            # Check for heading-like content
-            heading_keywords = [
-                'introduction', 'conclusion', 'abstract', 'methodology', 'results',
-                'discussion', 'analysis', 'implementation', 'architecture',
-                'background', 'overview', 'objectives', 'scope', 'deployment'
-            ]
-            
-            if any(keyword in text_lower for keyword in heading_keywords):
-                score += 3
-                content_type = 'heading_candidate'
-                patterns.append('heading_keyword')
-            
-            # Check for technical content
-            technical_patterns = [
-                'docker', 'github', 'repository', 'service:', 'hub -', '.js', '.py'
-            ]
-            
-            if any(pattern in text_lower for pattern in technical_patterns):
-                score -= 2
-                content_type = 'technical'
-                patterns.append('technical_content')
-            
-            # Check for personal/identity content
-            identity_patterns = [
-                'university', 'registration', 'submitted by', 'name:', 'phagwara'
-            ]
-            
-            if any(pattern in text_lower for pattern in identity_patterns):
-                score -= 3
-                content_type = 'identity'
-                patterns.append('identity_content')
-            
-            # Roman numeral or section patterns
-            if re.match(r'^\s*[IVX]+\.|^\s*\d+\.|^\s*[A-Z]\.', text):
-                score += 2
-                patterns.append('section_marker')
-            
-            df.at[idx, 'semantic_score'] = score
-            df.at[idx, 'content_type'] = content_type
-            df.at[idx, 'semantic_patterns'] = ';'.join(patterns)
-        
-        return df
-    
-    def _analyze_document_structure(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Analyze document structure (simplified implementation)"""
-        logger.info("📋 Analyzing document structure...")
-        
-        df['structure_score'] = 0
-        df['structure_patterns'] = ''
-        
-        # Simple structure analysis based on font sizes and positions
-        if 'font_size' in df.columns:
-            font_sizes = df['font_size'].dropna()
-            if len(font_sizes) > 0:
-                p90 = font_sizes.quantile(0.9)
-                p75 = font_sizes.quantile(0.75)
-                
-                for idx, row in df.iterrows():
-                    score = 0
-                    patterns = []
-                    
-                    font_size = row.get('font_size', 0)
-                    
-                    if font_size >= p90:
-                        score += 3
-                        patterns.append('very_large_font')
-                    elif font_size >= p75:
-                        score += 2
-                        patterns.append('large_font')
-                    
-                    df.at[idx, 'structure_score'] = score
-                    df.at[idx, 'structure_patterns'] = ';'.join(patterns)
-        
-        return df
         df['context_score'] = 0
         df['position_patterns'] = ''
+        
+        # Handle missing page column
+        if 'page' not in df.columns:
+            if 'page_num' in df.columns:
+                df['page'] = df['page_num']
+            else:
+                df['page'] = 1  # Default to page 1 if no page info
         
         for page in df['page'].unique():
             page_df = df[df['page'] == page].copy()
@@ -587,11 +561,31 @@ class EnhancedMetadataExtractor:
         df['section_boundary'] = False
         df['structure_patterns'] = ''
         
-        # Analyze numbering patterns
+        # Analyze numbering patterns - Enhanced for better detection
         numbering_patterns = {
-            'level_1': [r'^[IVX]+\.', r'^\d+\.$', r'^CHAPTER\s+\d+', r'^SECTION\s+\d+'],
-            'level_2': [r'^\d+\.\d+', r'^[A-Z]\.', r'^\d+\.\d+\.'],
-            'level_3': [r'^\d+\.\d+\.\d+', r'^[a-z][\.)]\s+', r'^\([a-z]\)']
+            'level_1': [
+                r'^[IVX]+\.',  # I., II., III.
+                r'^[IVX]+\.\s*[A-Z]',  # I.Introduction, II.Methodology
+                r'^\d+\.$',  # 1., 2., 3.
+                r'^\d+\.\s*[A-Z]',  # 1.Introduction, 2.System  
+                r'^CHAPTER\s+\d+', 
+                r'^SECTION\s+\d+',
+                r'^\d+\s+[A-Z]'  # 1 Introduction (space instead of dot)
+            ],
+            'level_2': [
+                r'^\d+\.\d+',  # 1.1, 2.3
+                r'^\d+\.\d+\s*[A-Z]',  # 1.1 Overview, 2.3 Analysis
+                r'^[A-Z]\.',  # A., B., C.
+                r'^[A-Z]\.\s*[A-Z]',  # A.Introduction, B.System
+                r'^\d+\.\d+\.'  # 1.1., 2.3.
+            ],
+            'level_3': [
+                r'^\d+\.\d+\.\d+', 
+                r'^\d+\.\d+\.\d+\s*[A-Z]',  # 1.1.1 Something
+                r'^[a-z][\.)]\s+', 
+                r'^\([a-z]\)',
+                r'^\([a-z]\)\s*[A-Z]'  # (a) Something
+            ]
         }
         
         for idx, row in df.iterrows():
@@ -693,70 +687,60 @@ class EnhancedMetadataExtractor:
         # Sort by page and position for hierarchical analysis
         df_sorted = df.sort_values(sort_columns, na_position='last')
         
-        # Font size analysis for hierarchy
-        if 'font_size' in df.columns:
-            font_sizes = df['font_size'].dropna()
-            if len(font_sizes) > 0:
-                p90 = font_sizes.quantile(0.90)
-                p75 = font_sizes.quantile(0.75)
-                p50 = font_sizes.quantile(0.50)
+        # Track hierarchy context
+        current_h1_level = 0
+        current_h2_level = 0
         
         for idx in df_sorted.index:
             row = df.loc[idx]
-            text = str(row.get('text', '')).strip()
-            font_size = row.get('font_size', 12)
             
-            level = 'H3'
+            # Skip if not likely to be a heading
+            if row.get('heading_likelihood', 0) < 0.3:
+                continue
+            
+            level = 'H3'  # Default
             confidence = 0.5
             
-            # Rule 1: Roman numerals and major sections = H1
-            if re.match(r'^\s*[IVX]+\.\s+', text, re.IGNORECASE):
+            # H1 criteria: highest font, strong typography, or structural indicators
+            h1_indicators = (
+                row.get('font_category') in ['very_large', 'large'] and
+                row.get('typography_score', 0) >= 2 and
+                row.get('hierarchy_level', 0) in [0, 1] and
+                row.get('semantic_score', 0) >= 1
+            )
+            
+            # Strong H1 patterns
+            if (row.get('hierarchy_level', 0) == 1 or
+                row.get('font_size_percentile_rank', 50) >= 95 or
+                'CHAPTER' in str(row.get('text', '')).upper() or
+                'SECTION' in str(row.get('text', '')).upper()):
                 level = 'H1'
                 confidence = 0.9
+                current_h1_level += 1
+                current_h2_level = 0
             
-            # Rule 2: Major headings by content
-            elif any(keyword in text.lower() for keyword in [
-                'abstract', 'introduction', 'conclusion', 'methodology', 
-                'implementation', 'analysis', 'results', 'discussion',
-                'background', 'overview', 'objectives', 'scope'
-            ]):
-                level = 'H1'
-                confidence = 0.8
-            
-            # Rule 3: Letter subsections = H2
-            elif re.match(r'^\s*[A-Z]\.\s+', text):
-                level = 'H2'
-                confidence = 0.85
-            
-            # Rule 4: Numbered subsections
-            elif re.match(r'^\s*\d+\.\d+\s+', text):
-                level = 'H3'
-                confidence = 0.8
-            elif re.match(r'^\s*\d+\.\s+', text):
+            # H2 criteria: medium-large font, good structure
+            elif (row.get('hierarchy_level', 0) == 2 or
+                  (row.get('font_category') in ['large', 'medium'] and
+                   row.get('typography_score', 0) >= 1 and
+                   row.get('semantic_score', 0) >= 0)):
                 level = 'H2'
                 confidence = 0.8
+                current_h2_level += 1
             
-            # Rule 5: Font size based hierarchy
-            if 'font_size' in df.columns and len(font_sizes) > 0:
-                if font_size >= p90:
-                    level = 'H1' if level == 'H3' else level
-                    confidence = max(confidence, 0.7)
-                elif font_size >= p75:
-                    level = 'H2' if level == 'H3' else level
-                    confidence = max(confidence, 0.6)
-            
-            # Rule 6: Sub-subsections = H3
-            if re.match(r'^\s*[A-Z]\.\d+\s+|^\s*\d+\.\d+\.\d+\s+', text):
+            # H3 for everything else that qualifies as heading
+            else:
                 level = 'H3'
-                confidence = 0.8
+                confidence = 0.7
             
-            # Update dataframe
+            # Context-based adjustments
+            if current_h1_level == 0 and level == 'H2':
+                level = 'H1'  # First major heading should be H1
+                confidence = 0.8
+                current_h1_level = 1
+            
             df.at[idx, 'recommended_level'] = level
             df.at[idx, 'level_confidence'] = confidence
-        
-        # Log hierarchy distribution
-        level_counts = df['recommended_level'].value_counts()
-        logger.info(f"   📊 Hierarchy distribution: {dict(level_counts)}")
         
         return df
 
@@ -769,16 +753,16 @@ def main():
     # Create sample test data
     test_data = {
         'text': [
-            'CHAPTER 1: INTRODUCTION',
-            'Bcrypt.js',
-            '1.1 Overview',
-            'This is a regular paragraph that should not be a heading.',
-            'Initially,',
-            'Docker-based',
-            'Methodology',
-            'The system employs several technologies.',
-            'A. System Architecture',
-            'References'
+            'CHAPTER 1: INTRODUCTION',  # Should be H1
+            'Bcrypt.js',  # Should be filtered
+            '1.1 Overview',  # Should be H2
+            'This is a regular paragraph that should not be a heading.',  # Should be filtered
+            'Initially,',  # Should be filtered (incomplete)
+            'Docker-based',  # Should be filtered (incomplete)
+            'Methodology',  # Should be H2 or H3
+            'The system employs several technologies.',  # Should be filtered
+            'A. System Architecture',  # Should be H2
+            'References'  # Should be H1 or H2
         ],
         'font_size': [16, 10, 14, 11, 12, 11, 13, 11, 14, 13],
         'page': [1, 1, 1, 1, 1, 2, 2, 2, 2, 2],
@@ -804,7 +788,14 @@ def main():
     for idx, row in enhanced_df.iterrows():
         print(f"\n📝 Text: '{row['text']}'")
         print(f"   🎯 Heading Likelihood: {row.get('heading_likelihood', 0):.3f}")
+        print(f"   📊 Typography Score: {row.get('typography_score', 0)}")
+        print(f"   🔤 Linguistic Score: {row.get('linguistic_score', 0)}")
+        print(f"   📍 Position Score: {row.get('position_score', 0)}")
+        print(f"   🧠 Semantic Score: {row.get('semantic_score', 0)}")
+        print(f"   🏗️ Structure Score: {row.get('structure_score', 0)}")
+        print(f"   ⚠️ Syntax Violations: {row.get('syntax_violations', 0)}")
         print(f"   📏 Recommended Level: {row.get('recommended_level', 'H3')}")
+        print(f"   🎨 Font Category: {row.get('font_category', 'medium')}")
         print(f"   🏷️ Content Type: {row.get('content_type', 'unknown')}")
 
 
