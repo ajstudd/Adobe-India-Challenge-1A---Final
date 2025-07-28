@@ -1,0 +1,15 @@
+/folder_structure.yaml
+venv/
+input/
+output/
+instructions.md
+dataset/
+local_dataset/
+labelled_data/
+unprocessed_pdfs/
+self_learn/extracted_csvs
+self_learn/pseudo_labeled
+self_learn/reports
+self_learn/predictions
+self_learn_backup_20250727_001044/
+predictions/

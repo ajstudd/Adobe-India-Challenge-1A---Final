@@ -1,0 +1,94 @@
+{
+  "pipeline_settings": {
+    "training_mode": "ultra_precision",
+    "confidence_threshold": 0.85,
+    "min_heading_percentage": 0.5,
+    "precision_focus": true,
+    "strict_heading_criteria": true,
+    "enable_intelligent_filtering": true,
+    "filtering_strictness": "moderate"
+  },
+  "feature_engineering": {
+    "font_percentiles": [70, 75, 80, 85, 90, 95, 98, 99],
+    "position_features": true,
+    "advanced_text_features": true,
+    "pos_features": true,
+    "dynamic_thresholding": true,
+    "cross_validation": true,
+    "heading_specific_features": true
+  },
+  "training": {
+    "test_size": 0.2,
+    "cv_folds": 10,
+    "stratified": true,
+    "threshold_optimization": "precision_focused",
+    "feature_selection": false,
+    "precision_target": 0.90
+  },
+  "model_params": {
+    "n_estimators": 2000,
+    "max_depth": 15,
+    "min_samples_split": 8,
+    "min_samples_leaf": 4,
+    "max_features": "sqrt",
+    "max_samples": 0.7,
+    "bootstrap": true,
+    "class_weight": {
+      "0": 1,
+      "1": 75
+    }
+  },
+  "smote_params": {
+    "sampling_strategy": 0.2,
+    "random_state": 42,
+    "k_neighbors": 5
+  },
+  "tfidf_params": {
+    "max_features": 50,
+    "ngram_range": [1, 2],
+    "min_df": 3,
+    "max_df": 0.7,
+    "stop_words": "english",
+    "sublinear_tf": true,
+    "norm": "l2"
+  },
+  "precision_filters": {
+    "min_font_size_percentile": 70,
+    "max_word_count": 20,
+    "min_word_count": 1,
+    "required_heading_patterns": true,
+    "exclude_sentence_patterns": true,
+    "strict_position_requirements": true
+  },
+  "heading_criteria": {
+    "level_1_requirements": {
+      "min_font_size_percentile": 85,
+      "max_word_count": 15,
+      "position_requirements": ["page_start", "section_start"]
+    },
+    "level_2_requirements": {
+      "min_font_size_percentile": 75,
+      "max_word_count": 20,
+      "position_requirements": ["section_start"]
+    },
+    "level_3_requirements": {
+      "min_font_size_percentile": 70,
+      "max_word_count": 25,
+      "position_requirements": ["subsection_start"]
+    }
+  },
+  "extraction_settings": {
+    "min_text_length": 3,
+    "font_percentiles": [50, 60, 70, 75, 80, 85, 90, 95, 98, 99],
+    "enable_fallback": true
+  },
+  "directories": {
+    "labelled_data": "labelled_data",
+    "unprocessed_pdfs": "unprocessed_pdfs",
+    "input": "input",
+    "output": "output",
+    "models": "models",
+    "predictions": "predictions",
+    "reviewed": "reviewed"
+  }
+}
