@@ -45,6 +45,13 @@ try:
 except ImportError as e:
     ENHANCED_METADATA_AVAILABLE = False
 
+# Import hierarchical numbering analyzer
+try:
+    from hierarchical_numbering_analyzer import HierarchicalNumberingAnalyzer
+    HIERARCHICAL_NUMBERING_AVAILABLE = True
+except ImportError as e:
+    HIERARCHICAL_NUMBERING_AVAILABLE = False
+
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -95,6 +102,14 @@ class IntelligentFilter:
         else:
             self.metadata_extractor = None
             logger.warning("⚠️  Enhanced metadata extractor not available")
+        
+        # Initialize hierarchical numbering analyzer
+        if HIERARCHICAL_NUMBERING_AVAILABLE:
+            self.numbering_analyzer = HierarchicalNumberingAnalyzer()
+            logger.info("✅ Hierarchical numbering analyzer initialized")
+        else:
+            self.numbering_analyzer = None
+            logger.warning("⚠️  Hierarchical numbering analyzer not available")
         
         # Exclusion patterns (common false positives) - Enhanced based on requirements
         self.exclusion_patterns = {
@@ -152,29 +167,34 @@ class IntelligentFilter:
             'implementation_fragments': re.compile(r'^the\s+implementation\s+of|^the\s+development\s+and|^the\s+application\s+is', re.IGNORECASE),
         }
         
-        # Positive patterns (likely to be headings) - Enhanced with better roman numeral and letter detection
+        # Positive patterns (likely to be headings) - Enhanced with hierarchical numbering
         self.positive_patterns = {
             'chapter_section': re.compile(r'^\s*(?:chapter|section|part|unit|lesson)\s+\d+', re.IGNORECASE),
             'appendix': re.compile(r'^\s*appendix\s+[a-z]\b', re.IGNORECASE),
             'common_headings': re.compile(r'^\s*(?:introduction|conclusion|summary|abstract|references|bibliography|acknowledgments?|methodology|results|discussion|analysis|overview|background|objectives?|scope|limitations?|recommendations?|findings)\s*$', re.IGNORECASE),
             
-            # Enhanced roman numeral patterns - MOST IMPORTANT FIXES
-            'roman_numerals_standalone': re.compile(r'^\s*[IVX]+\.?\s*$', re.IGNORECASE),  # Just "I" or "I." or "II" etc.
-            'roman_numerals_with_text': re.compile(r'^\s*[IVX]+\.\s+.*$', re.IGNORECASE),  # I. Something (any text after)
-            'roman_numerals_no_dot': re.compile(r'^\s*[IVX]+\s+[A-Z].*$', re.IGNORECASE),  # I Something (without dot)
+            # ENHANCED HIERARCHICAL NUMBERING PATTERNS - Using the new analyzer logic
+            # Decimal system patterns (1, 1.1, 1.1.1, etc.)
+            'decimal_simple': re.compile(r'^\s*\d+\s*\.?\s*$'),
+            'decimal_with_text': re.compile(r'^\s*\d+(?:\.\d+)*\.\s+[A-Z].*$'),
+            'decimal_headings': re.compile(r'^\s*\d+(?:\.\d+)*\s*\.?\s*[A-Z].*$'),
+            'decimal_multi_level': re.compile(r'^\s*\d+\.\d+(?:\.\d+)*\s*\.?\s*.*$'),
             
-            # Enhanced numbered heading patterns
-            'numbered_standalone': re.compile(r'^\s*\d+\.?\s*$'),  # Just "1" or "1." 
-            'numbered_headings': re.compile(r'^\s*\d+(?:\.\d+)*\s+[A-Z]'),  # 1.1 Something (capital start)
-            'numbered_heading_with_title': re.compile(r'^\s*\d+\.\s*[A-Z][a-z]*(?:\s+[A-Z][a-z]*)*$'),  # 1.Introduction, 1.System Architecture
-            'numbered_with_dot_space': re.compile(r'^\s*\d+\.\s+.*$'),  # 1. Something (any text after dot space)
-            'multilevel_numbered': re.compile(r'^\s*\d+\.\d+(?:\.\d+)*\.?\s*.*$'),  # 1.1, 1.1.1, etc.
+            # Roman numeral patterns (I, II, III, I.I, etc.) - COMPREHENSIVE FIX
+            'roman_simple': re.compile(r'^\s*[IVXLCDMivxlcdm]+\s*\.?\s*$', re.IGNORECASE),
+            'roman_with_text': re.compile(r'^\s*[IVXLCDMivxlcdm]+\.\s+[A-Z].*$', re.IGNORECASE),
+            'roman_standalone_text': re.compile(r'^\s*[IVXLCDMivxlcdm]+\s+[A-Z].*$', re.IGNORECASE),
+            'roman_dotted': re.compile(r'^\s*[IVXLCDMivxlcdm]+\.[IVXLCDMivxlcdm]+(?:\.[IVXLCDMivxlcdm]+)*\s*\.?\s*.*$', re.IGNORECASE),
             
-            # Enhanced letter-based heading patterns - CRITICAL FIX
-            'letter_standalone': re.compile(r'^\s*[A-Z]\.?\s*$'),  # Just "A" or "A."
-            'letter_headings': re.compile(r'^\s*[A-Z]\.\s+.*$'),  # A. Something (any text after)
-            'letter_no_dot': re.compile(r'^\s*[A-Z]\s+[A-Z].*$'),  # A Something (capital letter followed by capital word)
-            'letter_with_text': re.compile(r'^\s*[A-Z]\.\s*[A-Z][a-z]*(?:\s+[A-Z][a-z]*)*.*$'),  # A.Introduction, A.Government etc.
+            # Alphabetical patterns (A, B, C, A.1, etc.) - COMPREHENSIVE FIX  
+            'letter_simple': re.compile(r'^\s*[A-Z]\s*\.?\s*$'),
+            'letter_with_text': re.compile(r'^\s*[A-Z]\.\s+[A-Z].*$'),
+            'letter_standalone_text': re.compile(r'^\s*[A-Z]\s+[A-Z].*$'),
+            'letter_mixed': re.compile(r'^\s*[A-Z]\.\d+(?:\.[A-Za-z\d]+)*\s*\.?\s*.*$'),
+            
+            # Mixed system patterns (A.1, 1.A, etc.)
+            'mixed_alpha_num': re.compile(r'^\s*[A-Z]\.\d+(?:\.\w+)*\s*\.?\s*.*$'),
+            'mixed_num_alpha': re.compile(r'^\s*\d+\.[A-Z](?:\.\w+)*\s*\.?\s*.*$'),
             
             # Title case and other patterns
             'title_case_short': re.compile(r'^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,6}$'),  # Title Case (short)
@@ -277,7 +297,14 @@ class IntelligentFilter:
         char_count = len(text_clean)
         rejection_reasons = []
         
-        # FIRST: Check if this is a legitimate heading pattern (these should NEVER be rejected)
+        # FIRST: Check if this is a legitimate heading pattern using hierarchical analyzer
+        if self.numbering_analyzer:
+            is_valid_number, number_type, level = self.numbering_analyzer.is_valid_heading_number(text_clean)
+            if is_valid_number:
+                logger.debug(f"✅ Preserving hierarchical {number_type} heading (level {level}): {text_clean}")
+                return False, [f"preserved_hierarchical_{number_type}_level_{level}"]
+        
+        # SECOND: Check traditional positive patterns
         is_positive_heading, positive_pattern = self.check_positive_patterns(text_clean)
         if is_positive_heading:
             # This is a legitimate heading pattern - don't apply most filters
@@ -398,6 +425,13 @@ class IntelligentFilter:
         """Check if text matches any positive heading patterns"""
         text_clean = text.strip()
         
+        # First check with hierarchical numbering analyzer if available
+        if self.numbering_analyzer:
+            is_valid, pattern_type, level = self.numbering_analyzer.is_valid_heading_number(text_clean)
+            if is_valid:
+                return True, f"hierarchical_{pattern_type}_level_{level}"
+        
+        # Then check traditional positive patterns
         for pattern_name, pattern in self.positive_patterns.items():
             if pattern.search(text_clean):
                 return True, pattern_name
