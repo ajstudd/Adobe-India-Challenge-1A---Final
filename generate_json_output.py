@@ -988,6 +988,140 @@ class JSONOutputGenerator:
             "outline": outline
         }
         
+        # Apply final consecutive heading merging
+        json_output = self.merge_consecutive_headings_in_outline(json_output)
+        
+        return json_output
+    
+    def merge_consecutive_headings_in_outline(self, json_output):
+        """
+        Merge consecutive headings in the final outline where the first heading 
+        matches mergeable patterns (numbers, roman numerals, letters with dots)
+        """
+        if 'outline' not in json_output or not json_output['outline']:
+            return json_output
+        
+        import re
+        
+        # Define mergeable prefix patterns
+        mergeable_patterns = {
+            'numbers': re.compile(r'^\s*\d+\s*$'),                       # "1", "2", etc.
+            'numbered_dots': re.compile(r'^\s*\d+\.\s*$'),               # "1.", "2.", etc.
+            'numbered_multi': re.compile(r'^\s*\d+\.\d+\s*$'),           # "1.1", "2.3", etc.
+            'roman_numerals': re.compile(r'^\s*[IVX]+\s*$', re.IGNORECASE),     # "I", "II", "VII", etc.
+            'roman_numerals_dots': re.compile(r'^\s*[IVX]+\.\s*$', re.IGNORECASE),  # "I.", "VII.", etc.
+            'single_letter': re.compile(r'^\s*[A-Z]\.\s*$'),             # "A.", "B.", etc.
+            'letter_no_dot': re.compile(r'^\s*[A-Z]\s*$'),               # "A", "B", etc.
+        }
+        
+        outline = json_output['outline']
+        merged_outline = []
+        i = 0
+        merged_count = 0
+        
+        logger.info("🔗 Applying final consecutive heading merge to outline...")
+        
+        while i < len(outline):
+            current_entry = outline[i]
+            current_text = current_entry['text'].strip()
+            
+            # Check if current text matches any mergeable pattern
+            is_mergeable = False
+            pattern_name = ""
+            
+            for name, pattern in mergeable_patterns.items():
+                if pattern.match(current_text):
+                    is_mergeable = True
+                    pattern_name = name
+                    break
+            
+            # If current heading is mergeable and there's a next heading on the same page
+            if (is_mergeable and 
+                i + 1 < len(outline) and
+                outline[i + 1]['page'] == current_entry['page']):
+                
+                next_entry = outline[i + 1]
+                next_text = next_entry['text'].strip()
+                
+                # Additional validation: next text should look like a proper heading continuation
+                if (len(next_text) > 0 and 
+                    next_text[0].isupper() and  # Starts with uppercase
+                    len(next_text.split()) <= 10):  # Not too long
+                    
+                    # Merge the headings
+                    merged_text = f"{current_text} {next_text}".strip()
+                    merged_entry = {
+                        "level": next_entry['level'],  # Use the level of the second heading
+                        "text": merged_text,
+                        "page": current_entry['page']
+                    }
+                    
+                    merged_outline.append(merged_entry)
+                    merged_count += 1
+                    logger.debug(f"Merged outline headings: '{current_text}' + '{next_text}' -> '{merged_text}'")
+                    
+                    # Skip the next entry since we merged it
+                    i += 2
+                    continue
+            
+            # Also check for broken headings (consecutive single words)
+            if (len(current_text.split()) == 1 and 
+                current_text.isalpha() and 
+                current_text[0].isupper() and
+                i + 1 < len(outline) and
+                outline[i + 1]['page'] == current_entry['page']):
+                
+                # Look ahead for more single words to merge
+                words_to_merge = [current_text]
+                entries_to_merge = [current_entry]
+                j = i + 1
+                
+                while (j < len(outline) and 
+                       j < i + 4 and  # Look at most 3 entries ahead
+                       outline[j]['page'] == current_entry['page']):
+                    
+                    next_text = outline[j]['text'].strip()
+                    
+                    # Include single words or short phrases
+                    if (len(next_text.split()) <= 2 and 
+                        next_text.isalpha() and 
+                        next_text[0].isupper()):
+                        words_to_merge.append(next_text)
+                        entries_to_merge.append(outline[j])
+                        j += 1
+                    else:
+                        break
+                
+                # Merge if we have multiple words
+                if len(words_to_merge) >= 2:
+                    merged_text = " ".join(words_to_merge)
+                    
+                    # Validate the merged text looks reasonable
+                    if (len(merged_text) >= 5 and 
+                        len(merged_text.split()) <= 6):
+                        
+                        merged_entry = {
+                            "level": current_entry['level'],
+                            "text": merged_text,
+                            "page": current_entry['page']
+                        }
+                        
+                        merged_outline.append(merged_entry)
+                        merged_count += 1
+                        logger.debug(f"Merged broken heading: {' + '.join(words_to_merge)} -> '{merged_text}'")
+                        
+                        # Skip all merged entries
+                        i = j
+                        continue
+            
+            # No merge needed, add current entry as-is
+            merged_outline.append(current_entry)
+            i += 1
+        
+        logger.info(f"✅ Final outline merge completed: {merged_count} merges performed")
+        
+        # Update the JSON output
+        json_output['outline'] = merged_outline
         return json_output
     
     def validate_json_schema(self, json_data):

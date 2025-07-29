@@ -176,9 +176,13 @@ class IntelligentFilter:
         
         # Patterns for consecutive heading merging rule
         self.mergeable_prefix_patterns = {
-            'numbers': re.compile(r'^\s*\d+\s*$'),  # Just numbers like "1", "2", "3"
-            'roman_numerals': re.compile(r'^\s*[IVX]+\s*$', re.IGNORECASE),  # Roman numerals like "I", "II", "III"
-            'single_letter': re.compile(r'^\s*[A-Z]\.\s*$'),  # Single letter with dot like "A.", "B.", "C."
+            'numbers': re.compile(r'^\s*\d+\s*$'),                       # Just numbers like "1", "2", "3"
+            'numbered_dots': re.compile(r'^\s*\d+\.\s*$'),               # Numbers with dots like "1.", "2.", "3."
+            'numbered_multi': re.compile(r'^\s*\d+\.\d+\s*$'),           # Multi-level numbers like "1.1", "2.3"
+            'roman_numerals': re.compile(r'^\s*[IVX]+\s*$', re.IGNORECASE),     # Roman numerals like "I", "II", "VII"
+            'roman_numerals_dots': re.compile(r'^\s*[IVX]+\.\s*$', re.IGNORECASE),  # Roman numerals with dots like "I.", "VII."
+            'single_letter': re.compile(r'^\s*[A-Z]\.\s*$'),             # Single letter with dot like "A.", "B.", "C."
+            'letter_no_dot': re.compile(r'^\s*[A-Z]\s*$'),               # Single letter without dot like "A", "B", "C"
         }
         
         logger.info("🧠 Intelligent Filter initialized!")
@@ -865,6 +869,10 @@ class IntelligentFilter:
         first one is a number, roman numeral, or single character followed by a word.
         Examples: "1" + "Introduction" -> "1 Introduction"
                   "A." + "System Architecture" -> "A. System Architecture"
+                  "VII." + "Project Legacy" -> "VII. Project Legacy"
+        
+        Also merges broken headings that are split into multiple single words:
+        Examples: "Proactive" + "India" -> "Proactive India"
         """
         logger.info("🔗 Applying consecutive heading merge rule...")
         
@@ -881,6 +889,7 @@ class IntelligentFilter:
         
         df_sorted = df_copy.sort_values(sort_columns, na_position='last').reset_index(drop=True)
         
+        # First pass: merge numbered/lettered prefixes with following headings
         for i in range(len(df_sorted) - 1):
             current_row = df_sorted.iloc[i]
             next_row = df_sorted.iloc[i + 1]
@@ -940,7 +949,82 @@ class IntelligentFilter:
                     
                     indices_to_remove.add(original_current_idx)
                     merged_count += 1
-                    logger.debug(f"Merged '{current_text}' + '{next_text}' -> '{merged_text}'")
+                    logger.debug(f"Merged prefix '{current_text}' + '{next_text}' -> '{merged_text}'")
+        
+        # Second pass: merge broken headings (consecutive single words that likely form one heading)
+        # Re-sort after first pass modifications
+        df_sorted = df_copy.sort_values(sort_columns, na_position='last').reset_index(drop=True)
+        
+        for i in range(len(df_sorted) - 2):  # Look ahead up to 2 positions
+            if df_sorted.iloc[i].name in indices_to_remove:
+                continue
+                
+            current_row = df_sorted.iloc[i]
+            current_text = str(current_row.get('text', '')).strip()
+            current_is_heading = current_row.get('is_heading_pred', 0) == 1
+            
+            # Look for consecutive single words that might be a broken heading
+            if (current_is_heading and 
+                len(current_text.split()) == 1 and  # Single word
+                current_text.isalpha() and  # Only letters
+                current_text[0].isupper()):  # Starts with uppercase
+                
+                # Collect consecutive single-word headings on the same page
+                words_to_merge = [current_text]
+                rows_to_merge = [current_row]
+                
+                # Look ahead for more single words
+                for j in range(i + 1, min(i + 4, len(df_sorted))):  # Look at next 3 headings max
+                    if df_sorted.iloc[j].name in indices_to_remove:
+                        continue
+                        
+                    next_row = df_sorted.iloc[j]
+                    next_text = str(next_row.get('text', '')).strip()
+                    next_is_heading = next_row.get('is_heading_pred', 0) == 1
+                    same_page = current_row.get('page', 0) == next_row.get('page', 0)
+                    
+                    # Stop if not a heading, different page, or multi-word
+                    if not next_is_heading or not same_page:
+                        break
+                        
+                    # Include single words or known continuation patterns
+                    if (len(next_text.split()) == 1 and 
+                        next_text.isalpha() and 
+                        next_text[0].isupper()):
+                        words_to_merge.append(next_text)
+                        rows_to_merge.append(next_row)
+                    else:
+                        # If we find a longer text that seems related, include it and stop
+                        if len(next_text.split()) <= 3 and next_text[0].isupper():
+                            words_to_merge.append(next_text)
+                            rows_to_merge.append(next_row)
+                        break
+                
+                # Merge if we have multiple words and they seem to form a meaningful heading
+                if len(words_to_merge) >= 2:
+                    merged_text = " ".join(words_to_merge)
+                    
+                    # Additional validation: the merged text should look like a reasonable heading
+                    if (len(merged_text) >= 5 and  # Not too short
+                        not any(word.lower() in ['the', 'a', 'an', 'and', 'or', 'but'] for word in words_to_merge) and  # No obvious non-heading words
+                        len(merged_text.split()) <= 6):  # Not too long
+                        
+                        # Update the first row with merged text
+                        original_first_idx = rows_to_merge[0].name
+                        df_copy.at[original_first_idx, 'text'] = merged_text
+                        df_copy.at[original_first_idx, 'filter_decision'] = 'merged_broken_heading'
+                        df_copy.at[original_first_idx, 'filter_reasons'] = f"merged_broken_words: {' + '.join(words_to_merge)}"
+                        
+                        # Mark other rows for removal
+                        for row in rows_to_merge[1:]:
+                            original_idx = row.name
+                            df_copy.at[original_idx, 'is_heading_pred'] = 0
+                            df_copy.at[original_idx, 'filter_decision'] = 'merged_into_broken_heading'
+                            df_copy.at[original_idx, 'filter_reasons'] = f"merged_into: {merged_text}"
+                            indices_to_remove.add(original_idx)
+                        
+                        merged_count += 1
+                        logger.debug(f"Merged broken heading: {' + '.join(words_to_merge)} -> '{merged_text}'")
         
         logger.info(f"✅ Consecutive heading merge rule applied: {merged_count} merges performed")
         return df_copy
