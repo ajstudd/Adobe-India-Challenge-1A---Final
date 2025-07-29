@@ -478,8 +478,9 @@ class IntelligentFilter:
             return False, f"positive_override_{positive_pattern}"
         
         # CRITICAL: Check for obvious structural headings that should NEVER be excluded
-        # Roman numerals (with or without dots, with or without text)
-        if re.match(r'^\s*[IVX]+\.?\s*(?:[A-Z].*)?$', text_clean, re.IGNORECASE):
+        # Roman numerals (with or without dots, with or without text) - BUT be more restrictive
+        # Only match pure roman numerals or roman numerals followed by dot and space, then uppercase text
+        if re.match(r'^\s*[IVX]+\.?\s*$', text_clean, re.IGNORECASE) or re.match(r'^\s*[IVX]+\.\s+[A-Z].*$', text_clean, re.IGNORECASE):
             return False, "protected_roman_numeral"
         
         # Numbers with dots and optionally text (1., 1.1, 1. Something, etc.)
@@ -490,7 +491,7 @@ class IntelligentFilter:
         if re.match(r'^\s*[A-Z]\.?\s*(?:[A-Z].*)?$', text_clean):
             return False, "protected_letter_heading"
         
-        # Check for legitimate single-word headings
+        # Check for legitimate single-word headings - BUT ONLY if properly capitalized
         legitimate_single_words = {
             'introduction', 'methodology', 'analysis', 'conclusion', 'conclusions',
             'summary', 'abstract', 'overview', 'background', 'results', 'discussion',
@@ -498,7 +499,8 @@ class IntelligentFilter:
             'references', 'bibliography', 'appendix', 'appendices', 'objectives', 'scope'
         }
         
-        if text_clean.lower() in legitimate_single_words:
+        # Only allow legitimate single words if they are properly capitalized (start with uppercase)
+        if text_clean.lower() in legitimate_single_words and text_clean[0].isupper():
             return False, "legitimate_single_word"
         
         # USER REQUESTED RULES: Apply new strict filtering rules
