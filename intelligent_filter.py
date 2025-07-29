@@ -138,8 +138,8 @@ class IntelligentFilter:
             'programming_terms': re.compile(r'^(api|jwt|json|xml|http|https|css|html|javascript|nodejs|react|docker|kubernetes|git|github)$', re.IGNORECASE),
             'technical_fragments': re.compile(r'^(backend|frontend|interface|leverages|architecture|employs)$', re.IGNORECASE),
             
-            # Fragment patterns (Rule 5: Must not be fragments)
-            'single_words': re.compile(r'^\s*\w+\s*$'),  # Single word
+            # Fragment patterns (Rule 5: Must not be fragments) - FIXED: Don't exclude all single words
+            'bad_single_words': re.compile(r'^\s*(the|a|an|and|but|or|so|yet|for|nor|with|by|from|to|in|on|at|of|these|initially|however|therefore|thus|hence|moreover|furthermore|additionally)s*$', re.IGNORECASE),  # Only exclude function words, NOT content words
             'discourse_markers': re.compile(r'^(these|initially|however|therefore|thus|hence|moreover|furthermore|additionally|the\s+\w+|in\s+summary)$', re.IGNORECASE),
             'conjunctions': re.compile(r'^(and|but|or|so|yet|for|nor)$', re.IGNORECASE),
             'incomplete_phrases': re.compile(r'^(the|a|an|with|by|from|to|in|on|at|of|for)\s+\w+', re.IGNORECASE),
@@ -152,17 +152,32 @@ class IntelligentFilter:
             'implementation_fragments': re.compile(r'^the\s+implementation\s+of|^the\s+development\s+and|^the\s+application\s+is', re.IGNORECASE),
         }
         
-        # Positive patterns (likely to be headings) - Enhanced
+        # Positive patterns (likely to be headings) - Enhanced with better roman numeral and letter detection
         self.positive_patterns = {
             'chapter_section': re.compile(r'^\s*(?:chapter|section|part|unit|lesson)\s+\d+', re.IGNORECASE),
             'appendix': re.compile(r'^\s*appendix\s+[a-z]\b', re.IGNORECASE),
             'common_headings': re.compile(r'^\s*(?:introduction|conclusion|summary|abstract|references|bibliography|acknowledgments?|methodology|results|discussion|analysis|overview|background|objectives?|scope|limitations?|recommendations?|findings)\s*$', re.IGNORECASE),
+            
+            # Enhanced roman numeral patterns - MOST IMPORTANT FIXES
+            'roman_numerals_standalone': re.compile(r'^\s*[IVX]+\.?\s*$', re.IGNORECASE),  # Just "I" or "I." or "II" etc.
+            'roman_numerals_with_text': re.compile(r'^\s*[IVX]+\.\s+.*$', re.IGNORECASE),  # I. Something (any text after)
+            'roman_numerals_no_dot': re.compile(r'^\s*[IVX]+\s+[A-Z].*$', re.IGNORECASE),  # I Something (without dot)
+            
+            # Enhanced numbered heading patterns
+            'numbered_standalone': re.compile(r'^\s*\d+\.?\s*$'),  # Just "1" or "1." 
             'numbered_headings': re.compile(r'^\s*\d+(?:\.\d+)*\s+[A-Z]'),  # 1.1 Something (capital start)
             'numbered_heading_with_title': re.compile(r'^\s*\d+\.\s*[A-Z][a-z]*(?:\s+[A-Z][a-z]*)*$'),  # 1.Introduction, 1.System Architecture
-            'roman_numeral_headings': re.compile(r'^\s*[IVX]+\.\s*[A-Z][a-z]*(?:\s+[A-Z][a-z]*)*.*$', re.IGNORECASE),  # I.Introduction, II.Methodology
-            'title_case_short': re.compile(r'^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,6}$'),  # Title Case (short)
-            'roman_numerals': re.compile(r'^\s*[IVX]+\.\s+.*$', re.IGNORECASE),  # I. Something (any text after)
+            'numbered_with_dot_space': re.compile(r'^\s*\d+\.\s+.*$'),  # 1. Something (any text after dot space)
+            'multilevel_numbered': re.compile(r'^\s*\d+\.\d+(?:\.\d+)*\.?\s*.*$'),  # 1.1, 1.1.1, etc.
+            
+            # Enhanced letter-based heading patterns - CRITICAL FIX
+            'letter_standalone': re.compile(r'^\s*[A-Z]\.?\s*$'),  # Just "A" or "A."
             'letter_headings': re.compile(r'^\s*[A-Z]\.\s+.*$'),  # A. Something (any text after)
+            'letter_no_dot': re.compile(r'^\s*[A-Z]\s+[A-Z].*$'),  # A Something (capital letter followed by capital word)
+            'letter_with_text': re.compile(r'^\s*[A-Z]\.\s*[A-Z][a-z]*(?:\s+[A-Z][a-z]*)*.*$'),  # A.Introduction, A.Government etc.
+            
+            # Title case and other patterns
+            'title_case_short': re.compile(r'^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,6}$'),  # Title Case (short)
             'project_specific': re.compile(r'^\s*(?:abstract|outcomes?|project\s+plan|implementation|project\s+legacy|project\s+resources)\s*$', re.IGNORECASE),  # Document-specific
         }
         
@@ -254,12 +269,47 @@ class IntelligentFilter:
     def apply_rule_based_filters(self, text: str, row: pd.Series, context: Dict) -> Tuple[bool, List[str]]:
         """
         Apply the specific filtering rules from the requirements - MUCH more lenient
+        ENHANCED: Properly preserve legitimate headings (roman numerals, numbered, single-word)
         Returns: (should_reject, rejection_reasons)
         """
         text_clean = text.strip()
         word_count = len(text_clean.split())
         char_count = len(text_clean)
         rejection_reasons = []
+        
+        # FIRST: Check if this is a legitimate heading pattern (these should NEVER be rejected)
+        is_positive_heading, positive_pattern = self.check_positive_patterns(text_clean)
+        if is_positive_heading:
+            # This is a legitimate heading pattern - don't apply most filters
+            logger.debug(f"✅ Preserving legitimate heading pattern '{positive_pattern}': {text_clean}")
+            return False, [f"preserved_positive_pattern_{positive_pattern}"]
+        
+        # Check for legitimate single-word headings (common section names)
+        legitimate_single_words = {
+            'introduction', 'methodology', 'analysis', 'conclusion', 'conclusions',
+            'summary', 'abstract', 'overview', 'background', 'results', 'discussion',
+            'findings', 'limitations', 'recommendations', 'acknowledgments', 'acknowledgement',
+            'references', 'bibliography', 'appendix', 'appendices', 'objectives', 'scope',
+            'implementation', 'design', 'architecture', 'system', 'evaluation', 'validation',
+            'testing', 'deployment', 'configuration', 'installation', 'setup', 'requirements',
+            'specifications', 'performance', 'security', 'scalability', 'reliability',
+            'maintenance', 'troubleshooting', 'documentation', 'glossary', 'acronyms',
+            'future', 'recommendations', 'improvements', 'enhancements', 'extensions'
+        }
+        
+        if word_count == 1 and text_clean.lower() in legitimate_single_words:
+            logger.debug(f"✅ Preserving legitimate single-word heading: {text_clean}")
+            return False, [f"preserved_single_word_heading"]
+        
+        # Check for roman numerals (with or without dots)
+        if re.match(r'^\s*[IVX]+\.?\s*$', text_clean, re.IGNORECASE):
+            logger.debug(f"✅ Preserving roman numeral heading: {text_clean}")
+            return False, [f"preserved_roman_numeral"]
+        
+        # Check for numbered section headings (e.g., "1", "1.1", "A", "A.1")
+        if re.match(r'^\s*\d+(\.\d+)*\.?\s*$', text_clean) or re.match(r'^\s*[A-Z](\.\d+)*\.?\s*$', text_clean):
+            logger.debug(f"✅ Preserving numbered heading: {text_clean}")
+            return False, [f"preserved_numbered_heading"]
         
         # Rule 1: Only reject obvious sentence-like structures  
         if text_clean.endswith('.') and word_count > 15:  # Increased from 12
@@ -281,17 +331,19 @@ class IntelligentFilter:
             not any(pattern.search(text_clean) for pattern in self.positive_patterns.values())):
             rejection_reasons.append("lowercase_start_no_positive_pattern")
         
-        # Rule 5: Be more lenient with fragments
-        if word_count <= 1:  # Only reject single words
-            has_heading_words = any(word.lower() in self.common_heading_words 
-                                  for word in text_clean.split())
-            if not has_heading_words and len(text_clean) < 8:  # Very short single words
-                rejection_reasons.append("very_short_fragment")
+        # Rule 5: Be more lenient with fragments - only reject obvious function words
+        if word_count <= 1:
+            # Check if it's a function word that should be rejected
+            function_words = {'the', 'a', 'an', 'and', 'but', 'or', 'so', 'yet', 'for', 'nor', 
+                            'with', 'by', 'from', 'to', 'in', 'on', 'at', 'of', 'these', 
+                            'initially', 'however', 'therefore', 'thus', 'hence'}
+            if text_clean.lower() in function_words:
+                rejection_reasons.append("function_word")
         
         # Only check for the most obvious false positives
         obvious_false_positives = [
             "registration :", "lovely professional university",
-            "bcrypt.js", "dockerfile"
+            "bcrypt.js", "dockerfile", ", 2024. available:", "vps."
         ]
         
         if text_clean.lower() in obvious_false_positives:
@@ -303,9 +355,39 @@ class IntelligentFilter:
         return should_reject, rejection_reasons
     
     def check_exclusion_patterns(self, text: str) -> Tuple[bool, str]:
-        """Check if text matches any exclusion patterns"""
+        """Check if text matches any exclusion patterns - BUT respect positive patterns first"""
         text_clean = text.strip()
         
+        # FIRST: Check if this matches any positive pattern (these override exclusions)
+        is_positive, positive_pattern = self.check_positive_patterns(text_clean)
+        if is_positive:
+            return False, f"positive_override_{positive_pattern}"
+        
+        # CRITICAL: Check for obvious structural headings that should NEVER be excluded
+        # Roman numerals (with or without dots, with or without text)
+        if re.match(r'^\s*[IVX]+\.?\s*(?:[A-Z].*)?$', text_clean, re.IGNORECASE):
+            return False, "protected_roman_numeral"
+        
+        # Numbers with dots and optionally text (1., 1.1, 1. Something, etc.)
+        if re.match(r'^\s*\d+(?:\.\d+)*\.?\s*(?:[A-Z].*)?$', text_clean):
+            return False, "protected_numbered_heading"
+        
+        # Single letters with dots and optionally text (A., A. Something, etc.)
+        if re.match(r'^\s*[A-Z]\.?\s*(?:[A-Z].*)?$', text_clean):
+            return False, "protected_letter_heading"
+        
+        # Check for legitimate single-word headings
+        legitimate_single_words = {
+            'introduction', 'methodology', 'analysis', 'conclusion', 'conclusions',
+            'summary', 'abstract', 'overview', 'background', 'results', 'discussion',
+            'findings', 'limitations', 'recommendations', 'acknowledgments', 'acknowledgement',
+            'references', 'bibliography', 'appendix', 'appendices', 'objectives', 'scope'
+        }
+        
+        if text_clean.lower() in legitimate_single_words:
+            return False, "legitimate_single_word"
+        
+        # Now check exclusion patterns
         for pattern_name, pattern in self.exclusion_patterns.items():
             if pattern.search(text_clean):
                 return True, pattern_name
