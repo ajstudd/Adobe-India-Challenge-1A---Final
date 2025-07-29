@@ -16,12 +16,13 @@ RUN apt-get update && apt-get install -y \
 COPY ./src ./src
 COPY ./models ./models
 COPY ./config_main.json .
-COPY ./generate_json_output.py .
+COPY ./generate_corrected_json.py .
 COPY ./intelligent_filter.py .
 COPY ./enhanced_metadata_extractor.py .
+COPY ./hierarchical_numbering_analyzer.py .
 
 # Create input and output directories
 RUN mkdir -p /app/input /app/output
 
 # Set the entry point to our automated script
-CMD ["python", "generate_json_output.py"]
+CMD ["python", "generate_corrected_json.py"]
