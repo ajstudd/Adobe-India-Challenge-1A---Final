@@ -1,9 +1,0 @@
--These are the features we are using/want to use for out heading detection model
-
-**Dynamic font thresholding:** Avoids absolute font size bias
-
-**POS-based features:** Boosts accuracy, especially in noisy/mixed-language text
-
-**SMOTE class balancing:** Handles rare heading labels
-**Feature selection (RFECV) :** Trims unnecessary features, improves generalization
-**ROC & AUC evaluation :** Better metrics for heading detection tasks

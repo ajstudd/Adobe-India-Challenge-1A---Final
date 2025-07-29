@@ -561,11 +561,31 @@ class EnhancedMetadataExtractor:
         df['section_boundary'] = False
         df['structure_patterns'] = ''
         
-        # Analyze numbering patterns
+        # Analyze numbering patterns - Enhanced for better detection
         numbering_patterns = {
-            'level_1': [r'^[IVX]+\.', r'^\d+\.$', r'^CHAPTER\s+\d+', r'^SECTION\s+\d+'],
-            'level_2': [r'^\d+\.\d+', r'^[A-Z]\.', r'^\d+\.\d+\.'],
-            'level_3': [r'^\d+\.\d+\.\d+', r'^[a-z][\.)]\s+', r'^\([a-z]\)']
+            'level_1': [
+                r'^[IVX]+\.',  # I., II., III.
+                r'^[IVX]+\.\s*[A-Z]',  # I.Introduction, II.Methodology
+                r'^\d+\.$',  # 1., 2., 3.
+                r'^\d+\.\s*[A-Z]',  # 1.Introduction, 2.System  
+                r'^CHAPTER\s+\d+', 
+                r'^SECTION\s+\d+',
+                r'^\d+\s+[A-Z]'  # 1 Introduction (space instead of dot)
+            ],
+            'level_2': [
+                r'^\d+\.\d+',  # 1.1, 2.3
+                r'^\d+\.\d+\s*[A-Z]',  # 1.1 Overview, 2.3 Analysis
+                r'^[A-Z]\.',  # A., B., C.
+                r'^[A-Z]\.\s*[A-Z]',  # A.Introduction, B.System
+                r'^\d+\.\d+\.'  # 1.1., 2.3.
+            ],
+            'level_3': [
+                r'^\d+\.\d+\.\d+', 
+                r'^\d+\.\d+\.\d+\s*[A-Z]',  # 1.1.1 Something
+                r'^[a-z][\.)]\s+', 
+                r'^\([a-z]\)',
+                r'^\([a-z]\)\s*[A-Z]'  # (a) Something
+            ]
         }
         
         for idx, row in df.iterrows():

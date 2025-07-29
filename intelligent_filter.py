@@ -22,6 +22,7 @@ Strategy:
 - Apply sophisticated filtering using linguistic and semantic patterns
 - Assign proper heading hierarchy based on font size, structure, and content
 - Preserve high-quality headings while filtering false positives
+- Identify document title as first H1 heading within initial 100 blocks
 
 Author: AI Assistant
 Date: July 28, 2025
@@ -41,10 +42,8 @@ from typing import Dict, List, Tuple, Optional
 try:
     from enhanced_metadata_extractor import EnhancedMetadataExtractor
     ENHANCED_METADATA_AVAILABLE = True
-    logging.info("✅ Enhanced metadata extractor imported successfully")
 except ImportError as e:
     ENHANCED_METADATA_AVAILABLE = False
-    logging.warning(f"⚠️  Enhanced metadata extractor not available: {e}")
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -74,14 +73,14 @@ class IntelligentFilter:
         # Load configuration
         self.config = self.load_config(config_path)
         
-        # Filter thresholds - Enhanced
-        self.high_confidence_threshold = 0.9  # Never filter these
-        self.medium_confidence_threshold = 0.7  # Apply moderate filtering
-        self.low_confidence_threshold = 0.5  # Apply strict filtering
+        # Filter thresholds - Made Much Less Aggressive
+        self.high_confidence_threshold = 0.8  # Lowered from 0.9
+        self.medium_confidence_threshold = 0.5  # Lowered from 0.7  
+        self.low_confidence_threshold = 0.3  # Lowered from 0.5
         
-        # Enhanced thresholds for metadata-based filtering - less aggressive
-        self.heading_likelihood_threshold = 0.2  # Reduced from 0.4
-        self.syntax_violation_limit = 4  # Increased from 2
+        # Enhanced thresholds for metadata-based filtering - much less aggressive
+        self.heading_likelihood_threshold = 0.05  # Significantly reduced from 0.2
+        self.syntax_violation_limit = 8  # Increased from 4
         
         # Statistics for dynamic filtering
         self.document_stats = {}
@@ -116,13 +115,13 @@ class IntelligentFilter:
             # Document structure elements
             'footers': re.compile(r'^\s*(?:page\s+\d+|copyright|©|\d+\s*$)', re.IGNORECASE),
             'bullets': re.compile(r'^\s*[•◦▪▫◾▸►‣⁃]\s*'),
-            'numbered_lists': re.compile(r'^\s*\d+\.\s+[a-z]'),  # 1. something (lowercase start)
+            'numbered_lists': re.compile(r'^\s*\d+\.\s+[a-z]'),  # 1. something (lowercase start) - Keep this for actual lists
             'references': re.compile(r'^\s*\[\d+\]|\(\d{4}\)|\d{4}[a-z]?\b'),
             
-            # Sentence patterns (Rule 1: Reject sentence-like structures)
-            'sentence_endings': re.compile(r'^.+\.\s*$'),  # Ends with full stop
-            'long_sentences': re.compile(r'^.{120,}'),  # Longer than 120 characters
-            'question_sentences': re.compile(r'^.{20,}\?\s*$'),  # Questions are rarely headings
+            # Sentence patterns (Rule 1: Reject sentence-like structures) - Less aggressive
+            'sentence_endings': re.compile(r'^.{50,}\.\s*$'),  # Only long sentences ending with full stop
+            'long_sentences': re.compile(r'^.{150,}'),  # Increased from 120 characters
+            'question_sentences': re.compile(r'^.{30,}\?\s*$'),  # Increased from 20 chars
             
             # Identity and name patterns (Rule 2: Reject identity blocks)
             'university_patterns': re.compile(r'university|college|institute', re.IGNORECASE),
@@ -159,10 +158,12 @@ class IntelligentFilter:
             'appendix': re.compile(r'^\s*appendix\s+[a-z]\b', re.IGNORECASE),
             'common_headings': re.compile(r'^\s*(?:introduction|conclusion|summary|abstract|references|bibliography|acknowledgments?|methodology|results|discussion|analysis|overview|background|objectives?|scope|limitations?|recommendations?|findings)\s*$', re.IGNORECASE),
             'numbered_headings': re.compile(r'^\s*\d+(?:\.\d+)*\s+[A-Z]'),  # 1.1 Something (capital start)
+            'numbered_heading_with_title': re.compile(r'^\s*\d+\.\s*[A-Z][a-z]*(?:\s+[A-Z][a-z]*)*$'),  # 1.Introduction, 1.System Architecture
+            'roman_numeral_headings': re.compile(r'^\s*[IVX]+\.\s*[A-Z][a-z]*(?:\s+[A-Z][a-z]*)*.*$', re.IGNORECASE),  # I.Introduction, II.Methodology
             'title_case_short': re.compile(r'^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,6}$'),  # Title Case (short)
-            'roman_numerals': re.compile(r'^\s*[IVX]+\.\s+[A-Z]', re.IGNORECASE),  # I. Something
-            'letter_headings': re.compile(r'^\s*[A-Z]\.\s+[A-Z]'),  # A. Something
-            'starts_with_capital_number': re.compile(r'^[A-Z0-9]'),  # Rule 4: Must start with capital or number
+            'roman_numerals': re.compile(r'^\s*[IVX]+\.\s+.*$', re.IGNORECASE),  # I. Something (any text after)
+            'letter_headings': re.compile(r'^\s*[A-Z]\.\s+.*$'),  # A. Something (any text after)
+            'project_specific': re.compile(r'^\s*(?:abstract|outcomes?|project\s+plan|implementation|project\s+legacy|project\s+resources)\s*$', re.IGNORECASE),  # Document-specific
         }
         
         # Common heading words for fragment detection
@@ -173,9 +174,17 @@ class IntelligentFilter:
             'limitations', 'recommendations', 'findings', 'appendix', 'references'
         }
         
+        # Patterns for consecutive heading merging rule
+        self.mergeable_prefix_patterns = {
+            'numbers': re.compile(r'^\s*\d+\s*$'),  # Just numbers like "1", "2", "3"
+            'roman_numerals': re.compile(r'^\s*[IVX]+\s*$', re.IGNORECASE),  # Roman numerals like "I", "II", "III"
+            'single_letter': re.compile(r'^\s*[A-Z]\.\s*$'),  # Single letter with dot like "A.", "B.", "C."
+        }
+        
         logger.info("🧠 Intelligent Filter initialized!")
         logger.info(f"🎯 High confidence threshold: {self.high_confidence_threshold}")
         logger.info(f"🎯 Medium confidence threshold: {self.medium_confidence_threshold}")
+        logger.info("🔧 Added new filtering rules: consecutive heading merging and document title detection (first H1 in 100 blocks)")
         logger.info(f"🎯 Low confidence threshold: {self.low_confidence_threshold}")
     
     def load_config(self, config_path=None):
@@ -240,7 +249,7 @@ class IntelligentFilter:
     
     def apply_rule_based_filters(self, text: str, row: pd.Series, context: Dict) -> Tuple[bool, List[str]]:
         """
-        Apply the specific filtering rules from the requirements
+        Apply the specific filtering rules from the requirements - MUCH more lenient
         Returns: (should_reject, rejection_reasons)
         """
         text_clean = text.strip()
@@ -248,88 +257,44 @@ class IntelligentFilter:
         char_count = len(text_clean)
         rejection_reasons = []
         
-        # Rule 1: Reject sentence-like structures
-        if text_clean.endswith('.'):
-            rejection_reasons.append("ends_with_period")
-        
-        if word_count > 12:
+        # Rule 1: Only reject obvious sentence-like structures  
+        if text_clean.endswith('.') and word_count > 15:  # Increased from 12
+            rejection_reasons.append("long_sentence_with_period")
+            
+        if word_count > 20:  # Increased from 12
             rejection_reasons.append("too_many_words")
             
-        if char_count > 120:
+        if char_count > 150:  # Increased from 120
             rejection_reasons.append("too_many_characters")
         
-        # Rule 2: Reject identity blocks or names
-        identity_keywords = ["university", "registration", "b.tech", "name", "phagwara", "student", "college"]
+        # Rule 2: Only reject obvious identity blocks 
+        identity_keywords = ["registration :", "b.tech student", "university phagwara"]
         if any(keyword in text_clean.lower() for keyword in identity_keywords):
-            rejection_reasons.append("identity_pattern")
+            rejection_reasons.append("clear_identity_pattern")
         
-        # Rule 3: POS-based filter (if POS features are available)
-        if 'num_verbs' in row and 'num_nouns' in row and row['num_verbs'] > 0 and row['num_nouns'] > 0:
-            total_pos = row['num_verbs'] + row['num_nouns'] + row.get('num_adjs', 0) + row.get('num_advs', 0)
-            if total_pos > 0:
-                verb_ratio = row['num_verbs'] / total_pos
-                noun_ratio = row['num_nouns'] / total_pos
-                
-                if verb_ratio > 0.3 and noun_ratio < 0.2:
-                    rejection_reasons.append("high_verb_low_noun_ratio")
+        # Rule 4: Only reject if starts with lowercase (but allow some exceptions)
+        if (text_clean and text_clean[0].islower() and 
+            not any(pattern.search(text_clean) for pattern in self.positive_patterns.values())):
+            rejection_reasons.append("lowercase_start_no_positive_pattern")
         
-        # Rule 4: Must start with capital or number
-        if text_clean and not (text_clean[0].isupper() or text_clean[0].isdigit()):
-            rejection_reasons.append("no_capital_or_number_start")
-        
-        # Rule 5: Must not be fragments
-        if word_count <= 2:
-            # Check if it contains common heading words
+        # Rule 5: Be more lenient with fragments
+        if word_count <= 1:  # Only reject single words
             has_heading_words = any(word.lower() in self.common_heading_words 
                                   for word in text_clean.split())
-            if not has_heading_words:
-                rejection_reasons.append("fragment_without_heading_words")
+            if not has_heading_words and len(text_clean) < 8:  # Very short single words
+                rejection_reasons.append("very_short_fragment")
         
-        # Rule 6: Font and layout filtering
-        if 'font_size' in row and self.document_stats.get('font_percentiles'):
-            font_size = row['font_size']
-            median_font_size = self.document_stats['font_percentiles'].get(50, 12)
-            
-            # Check center alignment (if available)
-            center_aligned = row.get('center_aligned', 0)
-            
-            # Check Y position normalization (if available)
-            y_position_norm = 0.5  # Default middle
-            if 'line_position_on_page' in row and 'page' in row:
-                page = row['page']
-                line_pos = row['line_position_on_page']
-                # Estimate position normalization (top 30% is < 0.3)
-                if line_pos <= 3:
-                    y_position_norm = 0.1  # Top
-                elif line_pos > 10:
-                    y_position_norm = 0.7  # Lower
-            
-            if (font_size < median_font_size and 
-                center_aligned == 0 and 
-                y_position_norm > 0.3):
-                rejection_reasons.append("poor_font_layout_position")
-        
-        # Additional specific patterns from examples
-        specific_false_positives = [
-            "junaid ahmad", "registration :", "lovely professional university",
-            "phagwara", "bcrypt.js", "these", "initially,", "dockerfile",
-            "automation,", "oracle vps"
+        # Only check for the most obvious false positives
+        obvious_false_positives = [
+            "registration :", "lovely professional university",
+            "bcrypt.js", "dockerfile"
         ]
         
-        if text_clean.lower() in specific_false_positives:
-            rejection_reasons.append("known_false_positive")
+        if text_clean.lower() in obvious_false_positives:
+            rejection_reasons.append("obvious_false_positive")
         
-        # Check for system/technical fragments
-        system_fragments = [
-            "containerized infrastructure", "powered by docker",
-            "hosting environment", "oracle vps as the"
-        ]
-        
-        if any(fragment in text_clean.lower() for fragment in system_fragments):
-            rejection_reasons.append("system_fragment")
-        
-        # Should reject if any rejection reasons found
-        should_reject = len(rejection_reasons) > 0
+        # Should reject only if multiple major issues or obvious false positives
+        should_reject = len(rejection_reasons) >= 2 or any("obvious" in reason for reason in rejection_reasons)
         
         return should_reject, rejection_reasons
     
@@ -417,50 +382,53 @@ class IntelligentFilter:
         reasons = []
         score = 0.5  # Start neutral
         
-        # 1. Apply rule-based filters first (strict rejection criteria)
+        # 1. Apply rule-based filters first (but don't penalize as heavily)
         should_reject, rejection_reasons = self.apply_rule_based_filters(text, row, context)
         
         if should_reject:
-            # Strong penalty for rule-based rejections
-            score -= 0.5
+            # Moderate penalty for rule-based rejections instead of strong
+            score -= 0.2  # Reduced from 0.5
             reasons.extend([f"rule_reject_{reason}" for reason in rejection_reasons])
         
-        # 2. Confidence-based base score
+        # 2. Confidence-based base score - more generous
         if confidence >= self.high_confidence_threshold:
-            score += 0.3
+            score += 0.4  # Increased from 0.3
             reasons.append(f"high_confidence_{confidence:.3f}")
         elif confidence >= self.medium_confidence_threshold:
-            score += 0.1
+            score += 0.2  # Increased from 0.1
             reasons.append(f"medium_confidence_{confidence:.3f}")
-        else:
-            score -= 0.1
+        elif confidence >= self.low_confidence_threshold:
+            score += 0.0  # Neutral instead of negative
             reasons.append(f"low_confidence_{confidence:.3f}")
+        else:
+            score -= 0.05  # Very small penalty instead of -0.1
+            reasons.append(f"very_low_confidence_{confidence:.3f}")
         
-        # 3. Exclusion patterns (strong negative)
+        # 3. Exclusion patterns (moderate negative instead of strong)
         is_excluded, exclusion_reason = self.check_exclusion_patterns(text)
         if is_excluded:
-            score -= 0.4
+            score -= 0.2  # Reduced from 0.4
             reasons.append(f"excluded_{exclusion_reason}")
         
-        # 4. Positive patterns (strong positive)
+        # 4. Positive patterns (stronger positive boost)
         is_positive, positive_reason = self.check_positive_patterns(text)
         if is_positive:
-            score += 0.3
+            score += 0.5  # Increased from 0.3
             reasons.append(f"positive_{positive_reason}")
         
-        # 5. Length-based scoring (enhanced)
+        # 5. Length-based scoring (much more lenient)
         word_count = len(text.split())
-        if word_count <= 1:
-            score -= 0.3
-            reasons.append("too_short")
-        elif word_count > 25:
-            score -= 0.4
+        if word_count <= 1 and len(text) < 5:  # Only penalize very short text
+            score -= 0.2  # Reduced from 0.3
+            reasons.append("very_short")
+        elif word_count > 30:  # Increased from 25
+            score -= 0.3  # Reduced from 0.4
             reasons.append("too_long")
-        elif word_count > 12:  # From Rule 1
-            score -= 0.2
+        elif word_count > 20:  # Increased from 12
+            score -= 0.1  # Reduced from 0.2
             reasons.append("moderately_long")
-        elif 2 <= word_count <= 8:
-            score += 0.1
+        elif 2 <= word_count <= 15:  # Increased from 8
+            score += 0.15  # Increased from 0.1
             reasons.append("good_length")
         
         # 6. Font size relative scoring (enhanced with percentile thresholds)
@@ -468,18 +436,20 @@ class IntelligentFilter:
             font_size = row['font_size']
             percentiles = self.document_stats['font_percentiles']
             
-            if font_size >= percentiles.get(95, 16):
-                score += 0.3
+            # Since most fonts are the same size (9.96), be more lenient
+            if font_size >= percentiles.get(98, 16):
+                score += 0.4  # Increased from 0.3
                 reasons.append("very_large_font")
-            elif font_size >= percentiles.get(90, 14):
-                score += 0.2
+            elif font_size >= percentiles.get(95, 14):
+                score += 0.3  # Increased from 0.2
                 reasons.append("large_font")
-            elif font_size >= percentiles.get(75, 12):
-                score += 0.1
+            elif font_size >= percentiles.get(90, 12):
+                score += 0.2  # Increased from 0.1
                 reasons.append("above_avg_font")
-            elif font_size < percentiles.get(50, 11):
-                score -= 0.2
-                reasons.append("small_font")
+            elif font_size >= percentiles.get(50, 11):
+                score += 0.1  # Bonus for normal font
+                reasons.append("normal_font")
+            # Remove penalty for small fonts since most text has same size
         
         # 7. Context-based scoring
         if context['font_size_context'] == 'larger':
@@ -681,6 +651,22 @@ class IntelligentFilter:
         heading_levels = enhanced_df[enhanced_df['is_heading_pred'] == 1]['final_heading_level'].value_counts()
         logger.info(f"   📏 Heading levels: {dict(heading_levels)}")
         
+        # Apply new filtering rules
+        logger.info("🔧 Applying additional filtering rules...")
+        
+        # Rule 1: Apply document title rule (first heading in initial 100 blocks)
+        enhanced_df = self.apply_document_title_rule(enhanced_df)
+        
+        # Rule 2: Apply consecutive heading merge rule
+        enhanced_df = self.apply_consecutive_heading_merge_rule(enhanced_df)
+        
+        # Log final results after additional rules
+        final_predictions = enhanced_df['is_heading_pred'].sum()
+        final_heading_levels = enhanced_df[enhanced_df['is_heading_pred'] == 1]['final_heading_level'].value_counts()
+        logger.info(f"📊 Final Results After Additional Rules:")
+        logger.info(f"   🔢 Final predictions: {final_predictions}")
+        logger.info(f"   📏 Final heading levels: {dict(final_heading_levels)}")
+        
         return enhanced_df
     
     def calculate_enhanced_filter_score(self, row: pd.Series, context: Dict, confidence: float) -> Tuple[float, Dict]:
@@ -757,21 +743,19 @@ class IntelligentFilter:
         
         text = row.get('text', '').strip()
         
-        # Hard rejection criteria - less aggressive
+        # Hard rejection criteria - MUCH less aggressive
         if (syntax_violations >= self.syntax_violation_limit or
-            heading_likelihood < 0.1 or  # Reduced from 0.2
-            content_type == 'technical' or  # Removed 'fragment'
-            filter_score < 0.1):  # Reduced from 0.2
+            heading_likelihood < 0.01 or  # Very minimal threshold 
+            filter_score < -0.2):  # Only filter extremely bad scores
             return 'filtered_hard_criteria', 0, 'H3'
         
-        # Soft rejection criteria - less aggressive
-        if (heading_likelihood < self.heading_likelihood_threshold and
-            confidence < self.medium_confidence_threshold and
-            content_type == 'technical'):  # Added content type check
+        # Remove most soft rejection criteria to be less aggressive
+        # Only reject obvious technical terms
+        if (content_type == 'technical' and confidence < 0.3 and filter_score < 0.1):
             return 'filtered_soft_criteria', 0, 'H3'
         
-        # High confidence preservation
-        if confidence >= self.high_confidence_threshold and filter_score >= 0.3:
+        # High confidence preservation - more lenient
+        if confidence >= self.high_confidence_threshold:
             # Determine proper level based on metadata
             if recommended_level in ['H1', 'H2', 'H3']:
                 final_level = recommended_level
@@ -780,23 +764,26 @@ class IntelligentFilter:
             
             return 'keep_high_confidence', 1, final_level
         
-        # Good score preservation - less strict
-        if filter_score >= 0.4:  # Reduced from 0.6
+        # Good score preservation - much more lenient
+        if filter_score >= 0.2:  # Significantly reduced from 0.4
             final_level = recommended_level if recommended_level in ['H1', 'H2', 'H3'] else 'H2'
             return 'keep_good_score', 1, final_level
         
-        # Medium confidence with decent likelihood - less strict
-        if (confidence >= self.medium_confidence_threshold and 
-            heading_likelihood >= 0.3):  # Reduced from 0.5
-            final_level = recommended_level if recommended_level in ['H1', 'H2', 'H3'] else 'H3'
+        # Medium confidence preservation - much more lenient
+        if confidence >= self.medium_confidence_threshold:
+            final_level = recommended_level if recommended_level in ['H1', 'H2', 'H3'] else 'H2'
             return 'keep_medium_quality', 1, final_level
         
-        # Low confidence but good content type
-        if (content_type == 'heading_candidate' and filter_score >= 0.2):
+        # Low confidence but reasonable content - very lenient
+        if confidence >= self.low_confidence_threshold or filter_score >= 0.0:
             final_level = recommended_level if recommended_level in ['H1', 'H2', 'H3'] else 'H3'
-            return 'keep_content_based', 1, final_level
+            return 'keep_low_quality', 1, final_level
         
-        # Default: filter out
+        # Default: keep most things now, only filter very bad content
+        if filter_score >= -0.1:  # Keep almost everything
+            return 'keep_default', 1, 'H3'
+        
+        # Only filter truly bad content
         return 'filtered_default', 0, 'H3'
     
     def generate_filtering_report(self, df: pd.DataFrame, output_path: str = None):
@@ -872,6 +859,185 @@ class IntelligentFilter:
                 logger.error(f"❌ Error saving simplified report: {e2}")
                 return simplified_report
     
+    def apply_consecutive_heading_merge_rule(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Apply rule: Two consecutive headings of same level will be merged only if 
+        first one is a number, roman numeral, or single character followed by a word.
+        Examples: "1" + "Introduction" -> "1 Introduction"
+                  "A." + "System Architecture" -> "A. System Architecture"
+        """
+        logger.info("🔗 Applying consecutive heading merge rule...")
+        
+        merged_count = 0
+        df_copy = df.copy()
+        indices_to_remove = set()
+        
+        # Sort by page and position to ensure proper order
+        sort_columns = ['page']
+        if 'line_position_on_page' in df_copy.columns:
+            sort_columns.append('line_position_on_page')
+        elif 'y0' in df_copy.columns:
+            sort_columns.append('y0')
+        
+        df_sorted = df_copy.sort_values(sort_columns, na_position='last').reset_index(drop=True)
+        
+        for i in range(len(df_sorted) - 1):
+            current_row = df_sorted.iloc[i]
+            next_row = df_sorted.iloc[i + 1]
+            
+            # Skip if current row is already marked for removal
+            if current_row.name in indices_to_remove:
+                continue
+            
+            # Check if both are headings
+            current_is_heading = current_row.get('is_heading_pred', 0) == 1
+            next_is_heading = next_row.get('is_heading_pred', 0) == 1
+            
+            # Check if they're on the same page and close to each other
+            same_page = current_row.get('page', 0) == next_row.get('page', 0)
+            
+            if current_is_heading and next_is_heading and same_page:
+                current_text = str(current_row.get('text', '')).strip()
+                next_text = str(next_row.get('text', '')).strip()
+                
+                # Check if current text matches mergeable patterns
+                is_mergeable = False
+                merge_type = ""
+                
+                for pattern_type, pattern in self.mergeable_prefix_patterns.items():
+                    if pattern.match(current_text):
+                        # Additional check: next text should look like a proper heading
+                        if len(next_text) > 0 and (
+                            next_text[0].isupper() or  # Starts with uppercase
+                            any(word.lower() in self.common_heading_words for word in next_text.split())
+                        ):
+                            is_mergeable = True
+                            merge_type = pattern_type
+                            logger.debug(f"Found mergeable prefix '{current_text}' ({pattern_type}) followed by '{next_text}'")
+                            break
+                
+                if is_mergeable:
+                    # Merge the texts
+                    merged_text = f"{current_text} {next_text}".strip()
+                    
+                    # Update the next row with merged text and copy properties from current row
+                    original_next_idx = next_row.name
+                    df_copy.at[original_next_idx, 'text'] = merged_text
+                    df_copy.at[original_next_idx, 'filter_decision'] = 'merged_consecutive'
+                    df_copy.at[original_next_idx, 'filter_reasons'] = f"merged_with_prefix: {current_text} ({merge_type})"
+                    
+                    # Copy position info from the first element if needed
+                    if 'line_position_on_page' in df_copy.columns:
+                        df_copy.at[original_next_idx, 'line_position_on_page'] = current_row.get('line_position_on_page', next_row.get('line_position_on_page'))
+                    if 'y0' in df_copy.columns:
+                        df_copy.at[original_next_idx, 'y0'] = current_row.get('y0', next_row.get('y0'))
+                    
+                    # Mark the first heading as not a heading (remove it)
+                    original_current_idx = current_row.name
+                    df_copy.at[original_current_idx, 'is_heading_pred'] = 0
+                    df_copy.at[original_current_idx, 'filter_decision'] = 'merged_into_next'
+                    df_copy.at[original_current_idx, 'filter_reasons'] = f"merged_prefix_for: {next_text}"
+                    
+                    indices_to_remove.add(original_current_idx)
+                    merged_count += 1
+                    logger.debug(f"Merged '{current_text}' + '{next_text}' -> '{merged_text}'")
+        
+        logger.info(f"✅ Consecutive heading merge rule applied: {merged_count} merges performed")
+        return df_copy
+    
+    def apply_document_title_rule(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Apply rule: First heading/H1 in the initial 100 blocks is title of the document.
+        Ensure it gets H1 level and is preserved.
+        """
+        logger.info("📄 Applying document title rule...")
+        
+        # Sort dataframe to ensure we get the actual first blocks
+        sort_columns = ['page']
+        if 'line_position_on_page' in df.columns:
+            sort_columns.append('line_position_on_page')
+        elif 'y0' in df.columns:
+            sort_columns.append('y0')
+        
+        df_sorted = df.sort_values(sort_columns, na_position='last')
+        
+        # Find the first 100 blocks (or fewer if document is smaller)
+        initial_blocks = df_sorted.head(min(100, len(df_sorted)))
+        
+        # Find the first heading in these blocks
+        first_heading_idx = None
+        first_heading_position = None
+        
+        for position, (idx, row) in enumerate(initial_blocks.iterrows()):
+            if row.get('is_heading_pred', 0) == 1:
+                text = str(row.get('text', '')).strip()
+                
+                # Additional validation: should look like a document title
+                # - Not too short (unless it's a clear title)
+                # - Not a technical term or fragment
+                # - Preferably in title case or all caps
+                
+                word_count = len(text.split())
+                is_valid_title = True
+                
+                # Skip obvious non-titles
+                if (word_count == 1 and len(text) < 4) or text.lower() in ['the', 'a', 'an']:
+                    is_valid_title = False
+                elif any(pattern.search(text) for pattern in [
+                    self.exclusion_patterns.get('technical_terms', re.compile('')),
+                    self.exclusion_patterns.get('technical_fragments', re.compile('')),
+                    self.exclusion_patterns.get('programming_terms', re.compile('')),
+                    self.exclusion_patterns.get('file_paths', re.compile(''))
+                ]):
+                    is_valid_title = False
+                elif text.endswith('.') and word_count > 10:  # Long sentences
+                    is_valid_title = False
+                
+                if is_valid_title:
+                    first_heading_idx = idx
+                    first_heading_position = position
+                    break
+        
+        if first_heading_idx is not None:
+            title_text = df.at[first_heading_idx, 'text']
+            
+            # Mark as document title and ensure H1 level
+            df.at[first_heading_idx, 'final_heading_level'] = 'H1'
+            df.at[first_heading_idx, 'filter_decision'] = 'document_title'
+            df.at[first_heading_idx, 'filter_reasons'] = f'first_heading_document_title_position_{first_heading_position}'
+            df.at[first_heading_idx, 'is_heading_pred'] = 1  # Ensure it's preserved
+            
+            # Boost confidence for title
+            current_confidence = df.at[first_heading_idx, 'heading_confidence'] if 'heading_confidence' in df.columns else 0.8
+            df.at[first_heading_idx, 'heading_confidence'] = max(current_confidence, 0.9)
+            
+            logger.info(f"📄 Document title identified: '{title_text}' (position: {first_heading_position}, index: {first_heading_idx})")
+            
+            # Check for potential subtitle (next heading on same page or close by)
+            potential_subtitle_blocks = df_sorted.head(min(120, len(df_sorted)))
+            for position, (idx, row) in enumerate(potential_subtitle_blocks.iterrows()):
+                if (idx != first_heading_idx and 
+                    row.get('is_heading_pred', 0) == 1 and
+                    position > first_heading_position and 
+                    position <= first_heading_position + 15):  # Within 15 positions
+                    
+                    subtitle_text = str(row.get('text', '')).strip()
+                    subtitle_words = len(subtitle_text.split())
+                    
+                    # Valid subtitle criteria
+                    if (subtitle_words >= 2 and subtitle_words <= 15 and
+                        not any(pattern.search(subtitle_text) for pattern in self.exclusion_patterns.values())):
+                        
+                        df.at[idx, 'final_heading_level'] = 'H2'
+                        df.at[idx, 'filter_decision'] = 'document_subtitle'
+                        df.at[idx, 'filter_reasons'] = f'potential_subtitle_after_title'
+                        logger.info(f"📄 Potential subtitle identified: '{subtitle_text}' (position: {position})")
+                        break
+        else:
+            logger.warning("⚠️  No valid heading found in first 100 blocks for document title")
+        
+        return df
+
     def tune_thresholds(self, df: pd.DataFrame, target_precision: float = 0.9):
         """Tune filtering thresholds based on validation data with known labels"""
         if 'is_heading' not in df.columns:

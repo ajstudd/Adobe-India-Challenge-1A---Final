@@ -32,6 +32,7 @@ Date: July 28, 2025 (Enhanced with smart model selection)
 
 import os
 import sys
+import re
 import pandas as pd
 import numpy as np
 import pickle
@@ -824,31 +825,107 @@ class JSONOutputGenerator:
         return result_df
     
     def determine_heading_level(self, row, font_percentiles):
-        """Determine heading level (H1/H2/H3) based on font size and position"""
+        """Determine heading level (H1/H2/H3) based on font size, structure, and metadata"""
         font_size = row.get('font_size', 12)
         y_position = row.get('y0', row.get('y_position', 0))
         page_num = row.get('page_num', row.get('page', 1))
+        text = row.get('text', '').strip()
         
         # Get font thresholds
         high_font = font_percentiles.get(90, 16)
         medium_font = font_percentiles.get(75, 14)
+        low_font = font_percentiles.get(60, 12)
         
-        # H1 criteria: largest fonts, top of pages, or first page headings
-        if (font_size >= high_font or 
-            (page_num == 1 and y_position < 200) or
-            font_size >= font_percentiles.get(95, 18)):
+        # Enhanced metadata-based level detection
+        
+        # H1 Level Indicators (Main sections/chapters)
+        h1_patterns = [
+            r'^\s*(?:chapter|part)\s+\d+',  # Chapter 1, Part 1
+            r'^\s*[IVX]+\.\s*[A-Z]',  # I.Introduction, II.Methodology  
+            r'^\s*\d+\.\s*[A-Z][a-z]*(?:\s+[A-Z][a-z]*)*$',  # 1.Introduction, 2.System Architecture
+            r'^\s*(?:introduction|conclusion|summary|abstract|references|bibliography|acknowledgments?|methodology|results|discussion|overview|background)\s*$',
+        ]
+        
+        # H2 Level Indicators (Subsections)
+        h2_patterns = [
+            r'^\s*\d+\.\d+\s+[A-Z]',  # 1.1 Something, 2.3 Another
+            r'^\s*[A-Z]\.\s+[A-Z]',  # A. Something, B. Another
+            r'^\s*\d+\.\d+\.\s*[A-Z][a-z]*(?:\s+[A-Z][a-z]*)*$',  # 1.1.Introduction
+        ]
+        
+        # H3 Level Indicators (Sub-subsections)
+        h3_patterns = [
+            r'^\s*\d+\.\d+\.\d+\s+[A-Z]',  # 1.1.1 Something
+            r'^\s*[a-z][\.)]\s+[A-Z]',  # a) Something, b. Another
+            r'^\s*\([a-z]\)\s+[A-Z]',  # (a) Something
+        ]
+        
+        # Check structural patterns first (highest priority)
+        for pattern in h1_patterns:
+            if re.match(pattern, text, re.IGNORECASE):
+                return "H1"
+                
+        for pattern in h2_patterns:
+            if re.match(pattern, text, re.IGNORECASE):
+                return "H2"
+                
+        for pattern in h3_patterns:
+            if re.match(pattern, text, re.IGNORECASE):
+                return "H3"
+        
+        # Font-based classification with enhanced thresholds
+        if font_size >= high_font:
+            # Large fonts are typically H1
             return "H1"
-        
-        # H2 criteria: medium-large fonts
         elif font_size >= medium_font:
-            return "H2"
-        
-        # H3 criteria: everything else that's a heading
+            # Medium fonts could be H1 or H2 depending on context
+            # If it's at the start of a page or has certain patterns, make it H1
+            if (page_num == 1 and y_position < 300) or font_size >= font_percentiles.get(95, 18):
+                return "H1"
+            else:
+                return "H2"
+        elif font_size >= low_font:
+            # Smaller fonts are typically H2 or H3
+            # Check if it looks like a main section
+            if re.match(r'^\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s*$', text) and len(text.split()) <= 4:
+                return "H2"
+            else:
+                return "H3"
         else:
+            # Very small fonts are H3
             return "H3"
     
-    def create_json_structure(self, pdf_name, headings_df):
+    def create_json_structure(self, pdf_name, headings_df, all_blocks_df=None):
         """Create JSON structure for a PDF"""
+        
+        # Find document title from first H1 in initial 100 blocks
+        document_title = pdf_name.replace('_', ' ').title()  # Default fallback
+        
+        if all_blocks_df is not None:
+            # Look for first H1 heading in initial 100 blocks
+            initial_blocks = all_blocks_df.head(100)
+            initial_headings = initial_blocks[initial_blocks.get('is_heading', 0) == 1]
+            
+            if len(initial_headings) > 0:
+                # Check each heading to see if it's H1 level
+                for _, row in initial_headings.iterrows():
+                    # Use intelligent filter's heading level if available
+                    if 'final_heading_level' in row and row['final_heading_level'] == 'H1':
+                        document_title = str(row['text']).strip()
+                        logger.info(f"📝 Found document title from initial blocks: '{document_title}'")
+                        break
+                    else:
+                        # Determine level using existing logic
+                        font_percentiles = {75: 14, 90: 16, 95: 18}
+                        if 'font_size' in all_blocks_df.columns and len(all_blocks_df) > 0:
+                            for p in [75, 90, 95]:
+                                font_percentiles[p] = all_blocks_df['font_size'].quantile(p / 100.0)
+                        
+                        level = self.determine_heading_level(row, font_percentiles)
+                        if level == 'H1':
+                            document_title = str(row['text']).strip()
+                            logger.info(f"📝 Found document title from initial blocks: '{document_title}'")
+                            break
         
         # Calculate font percentiles for heading level determination (fallback)
         if 'font_size' in headings_df.columns and len(headings_df) > 0:
@@ -907,7 +984,7 @@ class JSONOutputGenerator:
         
         # Create final JSON structure
         json_output = {
-            "title": pdf_name.replace('_', ' ').title(),
+            "title": document_title,
             "outline": outline
         }
         
@@ -1029,14 +1106,43 @@ class JSONOutputGenerator:
                 
                 if len(headings_df) == 0:
                     logger.warning(f"⚠️  No headings detected in {pdf_name}")
+                    # Try to find document title from first H1 in initial blocks anyway
+                    document_title = pdf_name.replace('_', ' ').title()  # Default fallback
+                    
+                    if df_predictions is not None:
+                        # Look for first H1 heading in initial 100 blocks
+                        initial_blocks = df_predictions.head(100)
+                        initial_headings = initial_blocks[initial_blocks.get('is_heading', 0) == 1]
+                        
+                        if len(initial_headings) > 0:
+                            # Check each heading to see if it's H1 level
+                            for _, row in initial_headings.iterrows():
+                                # Use intelligent filter's heading level if available
+                                if 'final_heading_level' in row and row['final_heading_level'] == 'H1':
+                                    document_title = str(row['text']).strip()
+                                    logger.info(f"📝 Found document title from initial blocks: '{document_title}'")
+                                    break
+                                else:
+                                    # Determine level using existing logic
+                                    font_percentiles = {75: 14, 90: 16, 95: 18}
+                                    if 'font_size' in df_predictions.columns and len(df_predictions) > 0:
+                                        for p in [75, 90, 95]:
+                                            font_percentiles[p] = df_predictions['font_size'].quantile(p / 100.0)
+                                    
+                                    level = self.determine_heading_level(row, font_percentiles)
+                                    if level == 'H1':
+                                        document_title = str(row['text']).strip()
+                                        logger.info(f"📝 Found document title from initial blocks: '{document_title}'")
+                                        break
+                    
                     # Create minimal JSON with no outline
                     json_output = {
-                        "title": pdf_name.replace('_', ' ').title(),
+                        "title": document_title,
                         "outline": []
                     }
                 else:
                     # Create JSON structure
-                    json_output = self.create_json_structure(pdf_name, headings_df)
+                    json_output = self.create_json_structure(pdf_name, headings_df, df_predictions)
                 
                 # Validate JSON schema
                 if not self.validate_json_schema(json_output):
