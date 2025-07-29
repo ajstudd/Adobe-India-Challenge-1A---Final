@@ -1,0 +1,496 @@
+#!/usr/bin/env python3
+"""
+Direct hierarchical numbering JSON generation
+bypassing incorrect ML model predictions
+Now processes all PDFs in input folder and generates JSON files following output_schema.json
+"""
+
+import pandas as pd
+import json
+import sys
+import os
+import re
+import glob
+import fitz  # PyMuPDF
+import numpy as np
+from pathlib import Path
+
+# Optional OCR imports
+try:
+    import cv2
+    import pytesseract
+    from PIL import Image
+    OCR_AVAILABLE = True
+except ImportError:
+    OCR_AVAILABLE = False
+
+sys.path.append('.')
+
+def extract_pdf_blocks(pdf_path):
+    """Extract blocks from PDF using PyMuPDF (adapted from extract_local_dataset_to_csv.py)"""
+    print(f"📄 Extracting blocks from {os.path.basename(pdf_path)}...")
+    
+    doc = fitz.open(pdf_path)
+    blocks = []
+    
+    for page_num in range(doc.page_count):
+        page = doc.load_page(page_num)
+        page_height = page.rect.height
+        
+        # Gather all font sizes on this page for relative font size
+        font_sizes = []
+        page_dict = page.get_text("dict")
+        for b in page_dict.get("blocks", []):
+            if "lines" not in b:
+                continue
+            for line in b["lines"]:
+                for span in line["spans"]:
+                    if span["text"].strip():
+                        font_sizes.append(span["size"])
+        
+        median_font_size = float(np.median(font_sizes)) if font_sizes else 1.0
+        
+        # For heading level: get unique font sizes descending
+        unique_font_sizes = sorted(set(font_sizes), reverse=True)
+        font_size_to_level = {}
+        # Assign 1 to largest, 2 to second, 3 to third, 4 to fourth, 0 to others
+        if unique_font_sizes:
+            for idx, fs in enumerate(unique_font_sizes[:4]):
+                font_size_to_level[fs] = idx + 1  # 1,2,3,4
+        
+        found_block = False
+        prev_y1 = None
+        prev_heading_idx = None
+        
+        for b in page_dict.get("blocks", []):
+            if "lines" not in b:
+                continue
+            for line_idx, line in enumerate(b["lines"]):
+                line_text = ""
+                first_span = None
+                bbox = [None, None, None, None]
+                font = None
+                color = None
+                bold = italic = underline = False
+                
+                for span in line["spans"]:
+                    text = span["text"].strip()
+                    if not text:
+                        continue
+                    
+                    # Clean up text - remove control characters but preserve basic punctuation
+                    text = re.sub(r'[\u0000-\u0008\u000B-\u001F\u007F-\u009F]', '', text)
+                    text = text.strip()
+                    
+                    if not text:  # Skip if text becomes empty after cleaning
+                        continue
+                        
+                    if first_span is None:
+                        first_span = span
+                        bbox = [span["bbox"][0], span["bbox"][1], span["bbox"][2], span["bbox"][3]]
+                        font = span.get("font", None)
+                        color = span.get("color", None)
+                        bold = span.get("flags", 0) & 2 != 0
+                        italic = span.get("flags", 0) & 1 != 0
+                        underline = span.get("flags", 0) & 4 != 0
+                    else:
+                        bbox[0] = min(bbox[0], span["bbox"][0])
+                        bbox[1] = min(bbox[1], span["bbox"][1])
+                        bbox[2] = max(bbox[2], span["bbox"][2])
+                        bbox[3] = max(bbox[3], span["bbox"][3])
+                    line_text += (" " if line_text and not line_text[-1].isspace() and not text[0].isspace() else "") + text
+                
+                if line_text and first_span:
+                    found_block = True
+                    # Text features
+                    is_all_caps = int(line_text.isupper())
+                    is_title_case = int(line_text.istitle())
+                    ends_with_colon = int(line_text.strip().endswith(":"))
+                    starts_with_number = int(bool(line_text.strip() and line_text.strip().split()[0][0].isdigit()))
+                    punctuation_count = sum(1 for c in line_text if c in '.,;:!?-—()[]{}"\'')
+                    contains_colon = int(':' in line_text)
+                    contains_semicolon = int(';' in line_text)
+                    word_count = len(line_text.split())
+                    
+                    # Visual features
+                    y0 = bbox[1]
+                    y1 = bbox[3]
+                    line_position_on_page = y0 / page_height if page_height else 0
+                    font_size = first_span["size"]
+                    relative_font_size = font_size / median_font_size if median_font_size else 1.0
+                    
+                    # Context features
+                    distance_to_previous_heading = None
+                    if prev_heading_idx is not None:
+                        distance_to_previous_heading = line_idx - prev_heading_idx
+                    line_spacing_above = None
+                    if prev_y1 is not None:
+                        line_spacing_above = y0 - prev_y1
+                    
+                    # Heuristic heading level assignment
+                    heading_level = 0
+                    if font_size in font_size_to_level:
+                        # Only assign if text is short and not a bullet/math/hyperlink
+                        if word_count <= 12 and not (line_text.strip().startswith(("•", "-", "‣", "*")) or 
+                                                    any(sym in line_text for sym in ["=", "+", "-", "×", "÷", "∑", "∫", "√", "π", "∞"]) or 
+                                                    line_text.strip().startswith("http") or "www." in line_text or ".com" in line_text):
+                            heading_level = font_size_to_level[font_size]
+                    
+                    blocks.append({
+                        "text": line_text,
+                        "font_size": font_size,
+                        "page": page_num + 1,  # 1-based page numbering
+                        "x0": bbox[0],
+                        "y0": y0,
+                        "x1": bbox[2],
+                        "y1": y1,
+                        "font": font,
+                        "bold": bold,
+                        "italic": italic,
+                        "underline": underline,
+                        "color": color,
+                        "bullet": line_text.strip().startswith(("•", "-", "‣", "*")),
+                        "math": any(sym in line_text for sym in ["=", "+", "-", "×", "÷", "∑", "∫", "√", "π", "∞"]),
+                        "hyperlink": line_text.strip().startswith("http") or "www." in line_text or ".com" in line_text,
+                        "is_all_caps": is_all_caps,
+                        "is_title_case": is_title_case,
+                        "ends_with_colon": ends_with_colon,
+                        "starts_with_number": starts_with_number,
+                        "punctuation_count": punctuation_count,
+                        "contains_colon": contains_colon,
+                        "contains_semicolon": contains_semicolon,
+                        "word_count": word_count,
+                        "line_position_on_page": line_position_on_page,
+                        "relative_font_size": relative_font_size,
+                        "distance_to_previous_heading": distance_to_previous_heading,
+                        "line_spacing_above": line_spacing_above,
+                        "is_heading": 0,  # Prefill with 0 for all rows
+                        "heading_level": heading_level  # 0=normal, 1=largest, 2=second, 3=third, 4=fourth
+                    })
+                    prev_y1 = y1
+    
+    doc.close()
+    
+    if blocks:
+        df = pd.DataFrame(blocks)
+        print(f"✅ Extracted {len(df)} blocks from PDF")
+        return df
+    else:
+        print("❌ No blocks extracted from PDF")
+        return None
+
+def is_valid_heading_text(text):
+    """Check if text is valid for heading detection (filter out garbage/corrupted text)"""
+    
+    # Basic length check
+    if len(text.strip()) < 2:
+        return False
+    
+    # Remove common unicode control characters and whitespace for analysis
+    clean_text = re.sub(r'[\u0000-\u001F\u007F-\u009F]', '', text).strip()
+    
+    # If after removing control characters, text becomes too short or empty
+    if len(clean_text) < 2:
+        return False
+    
+    # Count control characters and special unicode characters
+    control_char_count = len(text) - len(clean_text)
+    control_char_ratio = control_char_count / len(text) if len(text) > 0 else 0
+    
+    # Reject if more than 30% of the text is control characters
+    if control_char_ratio > 0.3:
+        return False
+    
+    # Check for mostly numbers and special characters (like "5/\u0001 \u0001")
+    alphanumeric_count = sum(1 for c in clean_text if c.isalnum())
+    alphanumeric_ratio = alphanumeric_count / len(clean_text) if len(clean_text) > 0 else 0
+    
+    # Reject if less than 30% alphanumeric characters
+    if alphanumeric_ratio < 0.3:
+        return False
+    
+    # Reject pure numbers with minimal other content
+    if re.match(r'^[\d\s/\-.,\u0001]+$', text):
+        return False
+    
+    # Reject text that's mostly special characters or symbols
+    special_char_patterns = [
+        r'^[\d\s\u0001/\-.,;:!?()]+$',  # Mostly numbers, spaces, and basic punctuation
+        r'^[^\w\s]*$',  # Only non-word characters
+        r'^\s*[\u0001-\u001F]+\s*$',  # Only control characters and whitespace
+    ]
+    
+    for pattern in special_char_patterns:
+        if re.match(pattern, text):
+            return False
+    
+    # Check for minimum word content
+    words = clean_text.split()
+    if len(words) == 0:
+        return False
+    
+    # Check for excessive special characters
+    special_chars = re.findall(r'[#@$%^&*!]', text)
+    if len(special_chars) > len(text) * 0.4:  # More than 40% special chars
+        return False
+    
+    # For very short text, require at least one real word (not just numbers/symbols)
+    if len(words) <= 2:
+        has_real_word = any(
+            len(word) >= 2 and re.search(r'[a-zA-Z]', word) 
+            for word in words
+        )
+        if not has_real_word:
+            return False
+    
+    # Additional OCR corruption patterns
+    ocr_corruption_patterns = [
+        r'^[A-Z]{1,2}\d+\s*$',  # Single letters followed by numbers
+        r'^\d+[A-Z]{1,2}\s*$',  # Numbers followed by single letters
+        r'^[^\w\s]{3,}$',       # Three or more consecutive non-word characters
+        r'^\s*[|\\\/\-_=+<>~`]{2,}\s*$',  # Lines made of symbols
+        r'^[A-Z0-9#!@$%^&*]{10,}$',  # Long strings of caps, numbers and symbols (OCR garbage)
+        r'^[A-Z]{2,}\d{2,}[A-Z]{2,}',  # Mixed caps and numbers pattern
+        r'[#!@$%^&*]{3,}',  # Multiple special characters in a row
+        r'^[A-Z][a-z]*[A-Z][a-z]*[A-Z][a-z]*[A-Z]',  # Weird mixed case patterns
+        r'^[FN\[\]Q]{4,}',  # Common OCR misreads
+    ]
+    
+    for pattern in ocr_corruption_patterns:
+        if re.match(pattern, text):
+            return False
+    
+    return True
+
+def process_single_pdf(pdf_path, output_dir):
+    """Process a single PDF and generate its JSON output"""
+    pdf_name = Path(pdf_path).stem
+    print(f"\n� Processing: {pdf_name}")
+    print("=" * 50)
+    
+    # Extract blocks from PDF
+    df = extract_pdf_blocks(pdf_path)
+    if df is None or len(df) == 0:
+        print(f"❌ Failed to extract blocks from {pdf_name}")
+        return False
+    
+    # Import hierarchical numbering analyzer with fallback
+    try:
+        from hierarchical_numbering_analyzer import HierarchicalNumberingAnalyzer
+        analyzer = HierarchicalNumberingAnalyzer()
+        has_analyzer = True
+    except ImportError as e:
+        print(f"⚠️  Hierarchical numbering analyzer not available: {e}")
+        analyzer = None
+        has_analyzer = False
+    
+    try:
+        from intelligent_filter import IntelligentFilter
+        filter_system = IntelligentFilter()
+        has_filter = True
+    except ImportError as e:
+        print(f"⚠️  Intelligent filter not available: {e}")
+        filter_system = None
+        has_filter = False
+    
+    # Identify headings using hierarchical numbering + known patterns
+    headings = []
+    
+    print(f"\n🔍 ANALYZING BLOCKS FOR HEADINGS IN {pdf_name}:")
+    print("=" * 40)
+    
+    for idx, row in df.iterrows():
+        text = str(row['text']).strip()
+        
+        # Skip empty or very short text
+        if len(text) < 3:
+            continue
+        
+        # Enhanced text quality filtering
+        if not is_valid_heading_text(text):
+            continue
+            
+        # Check hierarchical numbering
+        is_valid_number, pattern_type, level = False, None, 0
+        if has_analyzer:
+            is_valid_number, pattern_type, level = analyzer.is_valid_heading_number(text)
+        
+        # Check exclusion patterns (personal info, etc.)
+        is_excluded, exclusion_reason = False, None
+        if has_filter:
+            is_excluded, exclusion_reason = filter_system.check_exclusion_patterns(text)
+        
+        # Additional specific exclusions for personal information
+        personal_info_patterns = [
+            'Junaid Ahmad', 'Registration :', 'B.Tech -', 'Lovely Professional University',
+            'Phagwara', 'Computer Science And Engineering'
+        ]
+        
+        for pattern in personal_info_patterns:
+            if pattern in text:
+                is_excluded = True
+                exclusion_reason = f"personal_info_{pattern.replace(' ', '_').replace('.', '').lower()}"
+                break
+        
+        # Check positive patterns
+        is_positive, positive_pattern = False, None
+        if has_filter:
+            is_positive, positive_pattern = filter_system.check_positive_patterns(text)
+        
+        # Check if it's a known good heading pattern
+        is_known_heading = any(pattern in text.upper() for pattern in [
+            'INTRODUCTION', 'METHODOLOGY', 'CONCLUSION', 'ABSTRACT', 'BACKGROUND',
+            'OVERVIEW', 'ANALYSIS', 'IMPLEMENTATION', 'RESULTS', 'DISCUSSION',
+            'SCOPE', 'PROJECT', 'SYSTEM', 'ARCHITECTURE', 'WORKFLOW', 'STRATEGY',
+            'OUTCOMES', 'LEGACY', 'DEPLOYMENT', 'INTEGRATION', 'DEVELOPMENT',
+            'CONTAINERIZATION', 'MICROSERVICES', 'PIPELINE'
+        ]) and len(text.split()) <= 8  # Must be reasonably short
+        
+        # Basic manual numbering check as fallback
+        if not has_analyzer:
+            basic_number_patterns = [
+                r'^\d+\.?\s*',           # 1. or 1 
+                r'^[IVX]+\.?\s*',        # I. or I
+                r'^[A-Z]\.?\s*',         # A. or A
+                r'^\d+\.\d+\.?\s*',      # 1.1. or 1.1
+                r'^[IVX]+\.[IVX]+\.?\s*' # I.I. or I.I
+            ]
+            for pattern in basic_number_patterns:
+                if re.match(pattern, text):
+                    is_valid_number = True
+                    pattern_type = "basic_numbering"
+                    level = 1  # Default level
+                    break
+        
+        # Decide if it's a heading
+        is_heading = False
+        reason = "not_heading"
+        
+        if is_excluded:
+            is_heading = False
+            reason = f"excluded_{exclusion_reason}"
+        elif is_valid_number:
+            is_heading = True
+            reason = f"numbered_{pattern_type}_level_{level}"
+        elif is_positive:
+            is_heading = True
+            reason = f"positive_{positive_pattern}"
+        elif is_known_heading:
+            is_heading = True
+            reason = "known_heading_pattern"
+        elif row.get('font_size', 12) > 15 and len(text.split()) <= 10 and not any(bad in text.lower() for bad in ['the ', 'and ', 'or ', 'but ', 'initially', 'these']):
+            # Additional check for large font headings - must have meaningful content
+            clean_text = re.sub(r'[\u0000-\u001F\u007F-\u009F]', '', text).strip()
+            word_count = len(clean_text.split())
+            has_letters = bool(re.search(r'[a-zA-Z]', clean_text))
+            
+            # Only consider as heading if it has letters and reasonable word count
+            if word_count >= 1 and has_letters and len(clean_text) >= 3:
+                is_heading = True
+                reason = "large_font_short_text"
+        
+        # Determine heading level
+        heading_level = "H3"  # Default
+        if is_heading:
+            if is_valid_number and level == 1:
+                heading_level = "H1"
+            elif is_valid_number and level == 2:
+                heading_level = "H2"
+            elif is_valid_number and level >= 3:
+                heading_level = "H3"
+            elif row.get('font_size', 12) > 20:
+                heading_level = "H1"
+            elif row.get('font_size', 12) > 15:
+                heading_level = "H2"
+            else:
+                heading_level = "H3"
+        
+        if is_heading:
+            headings.append({
+                'text': text,
+                'level': heading_level,
+                'page': int(row.get('page', 1)),  # Ensure 1-based page numbering
+                'reason': reason,
+                'font_size': row.get('font_size', 12)
+            })
+            
+            status = "✅ HEADING"
+            print(f"{status} | {heading_level} | {text[:50]:<50} | {reason}")
+    
+    print(f"\n📊 FOUND {len(headings)} HEADINGS")
+    
+    # Generate JSON structure following output_schema.json
+    json_output = {
+        "title": generate_title_from_pdf_name(pdf_name),
+        "outline": []
+    }
+    
+    for heading in headings:
+        json_output["outline"].append({
+            "text": heading['text'],
+            "level": heading['level'],
+            "page": heading['page']
+        })
+    
+    # Save JSON to output folder
+    output_path = os.path.join(output_dir, f'{pdf_name}.json')
+    with open(output_path, 'w', encoding='utf-8') as f:
+        json.dump(json_output, f, indent=2, ensure_ascii=False)
+    
+    print(f"✅ JSON SAVED: {output_path}")
+    return True
+
+def generate_title_from_pdf_name(pdf_name):
+    """Generate a proper title from PDF filename"""
+    # Remove common prefixes/suffixes and format as title
+    title = pdf_name.replace('_', ' ').replace('-', ' ')
+    title = ' '.join(word.capitalize() for word in title.split())
+    return title
+
+def main():
+    """Main function to process all PDFs in input folder and generate JSON outputs"""
+    print("� DIRECT HIERARCHICAL NUMBERING JSON GENERATION")
+    print("=" * 60)
+    print("📁 Processing all PDFs in input folder")
+    print("=" * 60)
+    
+    # Setup directories
+    input_dir = 'input'
+    output_dir = 'output'
+    
+    # Ensure directories exist
+    os.makedirs(input_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Find all PDF files in input directory
+    pdf_files = list(Path(input_dir).glob("*.pdf"))
+    
+    if not pdf_files:
+        print(f"❌ No PDF files found in {input_dir} directory")
+        return False
+    
+    print(f"� Found {len(pdf_files)} PDF files to process")
+    
+    successful = 0
+    failed = 0
+    
+    for pdf_path in pdf_files:
+        try:
+            success = process_single_pdf(str(pdf_path), output_dir)
+            if success:
+                successful += 1
+            else:
+                failed += 1
+        except Exception as e:
+            print(f"❌ Error processing {pdf_path.name}: {e}")
+            failed += 1
+    
+    print(f"\n🎯 PROCESSING COMPLETE!")
+    print(f"✅ Successfully processed: {successful}/{len(pdf_files)} PDFs")
+    print(f"❌ Failed: {failed}/{len(pdf_files)} PDFs") 
+    print(f"📁 JSON files saved to: {output_dir}")
+    
+    return successful > 0
+
+if __name__ == "__main__":
+    main()

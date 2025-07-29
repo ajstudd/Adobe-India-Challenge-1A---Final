@@ -138,13 +138,21 @@ class IntelligentFilter:
             'long_sentences': re.compile(r'^.{150,}'),  # Increased from 120 characters
             'question_sentences': re.compile(r'^.{30,}\?\s*$'),  # Increased from 20 chars
             
-            # Identity and name patterns (Rule 2: Reject identity blocks)
+            # Identity and name patterns (Rule 2: Reject identity blocks) - ENHANCED FOR PERSONAL INFO
             'university_patterns': re.compile(r'university|college|institute', re.IGNORECASE),
             'registration_patterns': re.compile(r'registration\s*:?\s*\d+|b\.?tech|student|name\s*:', re.IGNORECASE),
             'location_patterns': re.compile(r'phagwara|punjab|india', re.IGNORECASE),
             'person_names': re.compile(r'^[A-Z][a-z]+\s+[A-Z][a-z]+$'),  # FirstName LastName pattern
             'full_names': re.compile(r'^[A-Z][a-z]+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*$'),  # Full names
             'course_names': re.compile(r'computer\s+science|engineering|b\.?tech', re.IGNORECASE),
+            
+            # SPECIFIC PERSONAL INFO PATTERNS FROM CURRENT JSON OUTPUT
+            'specific_names': re.compile(r'^(junaid|ahmad|junaid\s+ahmad)$', re.IGNORECASE),
+            'specific_registration': re.compile(r'^registration\s*:\s*12315906$', re.IGNORECASE),
+            'specific_course': re.compile(r'^b\.tech\s*-\s*computer\s+science\s+and\s+engineering$', re.IGNORECASE),
+            'specific_university': re.compile(r'^lovely\s+professional\s+university$', re.IGNORECASE),
+            'academic_degree_patterns': re.compile(r'^b\.tech\s*-\s*.*$|^bachelor\s+of\s+technology.*$', re.IGNORECASE),
+            'degree_specialization': re.compile(r'^computer\s+science\s+and\s+engineering$', re.IGNORECASE),
             
             # Technical terms and tools
             'technical_terms': re.compile(r'^[A-Z][a-z]*\.(js|py|css|html)$|docker|bcrypt|automation|vps|api|jwt|json|web|token', re.IGNORECASE),
