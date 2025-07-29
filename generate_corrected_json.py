@@ -497,11 +497,59 @@ def process_single_pdf(pdf_path, output_dir):
         
         # Check if it's a known good heading pattern
         is_known_heading = any(pattern in text.upper() for pattern in [
+            # Common document sections
             'INTRODUCTION', 'METHODOLOGY', 'CONCLUSION', 'ABSTRACT', 'BACKGROUND',
             'OVERVIEW', 'ANALYSIS', 'IMPLEMENTATION', 'RESULTS', 'DISCUSSION',
+            'SUMMARY', 'EXECUTIVE SUMMARY', 'FINDINGS', 'RECOMMENDATIONS',
+            'REFERENCES', 'BIBLIOGRAPHY', 'APPENDIX', 'ACKNOWLEDGMENTS',
+            'PREFACE', 'FOREWORD', 'TABLE OF CONTENTS', 'INDEX',
+            
+            # Technical/Academic sections
             'SCOPE', 'PROJECT', 'SYSTEM', 'ARCHITECTURE', 'WORKFLOW', 'STRATEGY',
             'OUTCOMES', 'LEGACY', 'DEPLOYMENT', 'INTEGRATION', 'DEVELOPMENT',
-            'CONTAINERIZATION', 'MICROSERVICES', 'PIPELINE'
+            'CONTAINERIZATION', 'MICROSERVICES', 'PIPELINE', 'FRAMEWORK',
+            'DESIGN', 'SPECIFICATION', 'REQUIREMENTS', 'TESTING', 'VALIDATION',
+            'EVALUATION', 'PERFORMANCE', 'OPTIMIZATION', 'SECURITY', 'MAINTENANCE',
+            'CONFIGURATION', 'INSTALLATION', 'SETUP', 'TROUBLESHOOTING',
+            'LITERATURE REVIEW', 'RELATED WORK', 'PRIOR ART', 'STATE OF THE ART',
+            
+            # Business/Report sections
+            'OBJECTIVES', 'GOALS', 'PURPOSE', 'MISSION', 'VISION', 'VALUES',
+            'MARKET', 'COMPETITION', 'COMPETITIVE ANALYSIS', 'SWOT',
+            'RISK', 'CHALLENGES', 'OPPORTUNITIES', 'TIMELINE', 'SCHEDULE',
+            'BUDGET', 'COST', 'RESOURCES', 'TEAM', 'ORGANIZATION',
+            'MANAGEMENT', 'GOVERNANCE', 'COMPLIANCE', 'LEGAL', 'REGULATORY',
+            'FINANCIAL', 'ECONOMIC', 'IMPACT', 'BENEFITS', 'ROI',
+            
+            # Chapter/Section indicators
+            'CHAPTER', 'SECTION', 'PART', 'UNIT', 'MODULE', 'LESSON',
+            'EXERCISE', 'ASSIGNMENT', 'TASK', 'ACTIVITY', 'CASE STUDY',
+            'SCENARIO', 'EXAMPLE', 'ILLUSTRATION', 'FIGURE', 'TABLE',
+            
+            # Research/Academic
+            'HYPOTHESIS', 'THEORY', 'MODEL', 'EXPERIMENT', 'SURVEY',
+            'INTERVIEW', 'OBSERVATION', 'DATA COLLECTION', 'DATA ANALYSIS',
+            'STATISTICAL ANALYSIS', 'QUALITATIVE', 'QUANTITATIVE',
+            'METHODS', 'PROCEDURE', 'PROTOCOL', 'ETHICS', 'LIMITATIONS',
+            'FUTURE WORK', 'RECOMMENDATIONS', 'IMPLICATIONS',
+            
+            # Technical documentation
+            'API', 'DATABASE', 'NETWORK', 'INFRASTRUCTURE', 'CLOUD',
+            'MONITORING', 'LOGGING', 'BACKUP', 'RECOVERY', 'SCALABILITY',
+            'AVAILABILITY', 'RELIABILITY', 'USABILITY', 'ACCESSIBILITY',
+            'USER INTERFACE', 'USER EXPERIENCE', 'WORKFLOW', 'PROCESS',
+            'ALGORITHM', 'DATA STRUCTURE', 'SOFTWARE', 'HARDWARE',
+            
+            # Problem-solving sections
+            'PROBLEM', 'SOLUTION', 'APPROACH', 'ALTERNATIVE', 'OPTION',
+            'CRITERIA', 'DECISION', 'SELECTION', 'COMPARISON', 'TRADE-OFF',
+            'PROS AND CONS', 'ADVANTAGES', 'DISADVANTAGES', 'ISSUES',
+            'CONCERNS', 'MITIGATION', 'CONTINGENCY', 'BACKUP PLAN',
+            
+            # Quality/Standards
+            'QUALITY', 'STANDARDS', 'BEST PRACTICES', 'GUIDELINES',
+            'POLICIES', 'PROCEDURES', 'DOCUMENTATION', 'TRAINING',
+            'SUPPORT', 'HELP', 'FAQ', 'GLOSSARY', 'TERMS', 'DEFINITIONS'
         ]) and len(text.split()) <= 8  # Must be reasonably short
         
         # Basic manual numbering check as fallback
@@ -520,7 +568,7 @@ def process_single_pdf(pdf_path, output_dir):
                     level = 1  # Default level
                     break
         
-        # Decide if it's a heading
+        # Decide if it's a heading - Enhanced logic with multiple criteria
         is_heading = False
         reason = "not_heading"
         
@@ -536,32 +584,178 @@ def process_single_pdf(pdf_path, output_dir):
         elif is_known_heading:
             is_heading = True
             reason = "known_heading_pattern"
-        elif row.get('font_size', 12) > 15 and len(text.split()) <= 10 and not any(bad in text.lower() for bad in ['the ', 'and ', 'or ', 'but ', 'initially', 'these']):
-            # Additional check for large font headings - must have meaningful content
+        else:
+            # Enhanced heading detection for non-numbered headings
             clean_text = re.sub(r'[\u0000-\u001F\u007F-\u009F]', '', text).strip()
             word_count = len(clean_text.split())
             has_letters = bool(re.search(r'[a-zA-Z]', clean_text))
             
-            # Only consider as heading if it has letters and reasonable word count
-            if word_count >= 1 and has_letters and len(clean_text) >= 3:
+            # Get text properties from extracted block data
+            font_size = row.get('font_size', 12)
+            is_bold = row.get('bold', False)
+            is_italic = row.get('italic', False) 
+            is_all_caps = row.get('is_all_caps', False) or (text.isupper() and has_letters)
+            is_title_case = row.get('is_title_case', False)
+            ends_with_colon = row.get('ends_with_colon', False)
+            starts_with_number = row.get('starts_with_number', False)
+            relative_font_size = row.get('relative_font_size', 1.0)
+            
+            # Calculate text characteristics
+            is_short = word_count <= 15  # Increased from 10
+            is_medium_short = word_count <= 8
+            is_very_short = word_count <= 5
+            
+            # Check for bad heading indicators (discourse markers, articles, etc.)
+            bad_heading_words = ['the ', 'and ', 'or ', 'but ', 'initially', 'these ', 'however', 'therefore', 'thus', 'moreover', 'furthermore']
+            has_bad_words = any(bad in text.lower() for bad in bad_heading_words)
+            
+            # Check if it starts with a capital letter (good heading indicator)
+            starts_with_capital = bool(re.match(r'^[A-Z]', clean_text))
+            
+            # Check title case (multiple capital letters at word boundaries)
+            title_case_words = len(re.findall(r'\b[A-Z][a-z]+', text))
+            is_title_case = title_case_words >= 2 and word_count <= 10
+            
+            # Multiple criteria for heading detection
+            heading_score = 0
+            reasons = []
+            
+            # Font size criteria (consider relative font size too)
+            if font_size > 18 or relative_font_size > 1.5:
+                heading_score += 3
+                reasons.append("large_font")
+            elif font_size > 15 or relative_font_size > 1.3:
+                heading_score += 2
+                reasons.append("medium_large_font")
+            elif font_size > 13 or relative_font_size > 1.1:
+                heading_score += 1
+                reasons.append("slightly_large_font")
+            
+            # Bold text (strong heading indicator)
+            if is_bold:
+                heading_score += 2
+                reasons.append("bold")
+            
+            # Italic text (moderate heading indicator)
+            if is_italic and not is_bold:
+                heading_score += 1
+                reasons.append("italic")
+            
+            # All caps (strong heading indicator if short)
+            if is_all_caps and is_medium_short:
+                heading_score += 2
+                reasons.append("all_caps")
+            elif is_all_caps and is_short:
+                heading_score += 1
+                reasons.append("all_caps_medium")
+            
+            # Title case (good heading indicator)
+            if is_title_case and is_short:
+                heading_score += 2
+                reasons.append("title_case")
+            elif title_case_words >= 2 and word_count <= 10:
+                heading_score += 1
+                reasons.append("title_case_manual")
+            
+            # Ends with colon (section heading indicator)
+            if ends_with_colon and is_medium_short:
+                heading_score += 2
+                reasons.append("ends_with_colon")
+            
+            # Length criteria
+            if is_very_short and not has_bad_words:
+                heading_score += 1
+                reasons.append("very_short")
+            elif is_medium_short and not has_bad_words:
+                heading_score += 1
+                reasons.append("medium_short")
+            
+            # Starts with capital (weak but positive indicator)
+            if starts_with_capital and not has_bad_words:
+                heading_score += 1
+                reasons.append("capital_start")
+            
+            # Position-based criteria (beginning of page or after large gap)
+            line_position = row.get('line_position_on_page', 999)
+            if line_position <= 0.1:  # Near top of page (first 10%)
+                heading_score += 1
+                reasons.append("page_top")
+            
+            # Spacing criteria (if available)
+            line_spacing_above = row.get('line_spacing_above')
+            if line_spacing_above and line_spacing_above > 20:  # Large gap above
+                heading_score += 1
+                reasons.append("large_gap_above")
+            
+            # Penalty for bad heading indicators
+            if has_bad_words:
+                heading_score -= 2
+                reasons.append("bad_words_penalty")
+            
+            # Check if text is too long to be a heading
+            if word_count > 20:
+                heading_score -= 2
+                reasons.append("too_long_penalty")
+            elif word_count > 15:
+                heading_score -= 1
+                reasons.append("long_penalty")
+            
+            # Sentence-like text (ends with period and is long)
+            if text.endswith('.') and word_count > 10:
+                heading_score -= 1
+                reasons.append("sentence_like_penalty")
+            
+            # Bullet points or lists (negative indicator)
+            if row.get('bullet', False) or text.strip().startswith(('•', '-', '*', '○', '▪')):
+                heading_score -= 2
+                reasons.append("bullet_penalty")
+            
+            # Math or code (negative indicator)
+            if row.get('math', False) or '=' in text or any(code_indicator in text for code_indicator in ['()', '{}', '[]', '//']):
+                heading_score -= 1
+                reasons.append("math_code_penalty")
+            
+            # Final decision based on score
+            if heading_score >= 3 and has_letters and len(clean_text) >= 3:
                 is_heading = True
-                reason = "large_font_short_text"
+                reason = f"typography_score_{heading_score}_({'+'.join(reasons)})"
+            elif (font_size > 15 or is_bold) and is_short and not has_bad_words and has_letters:
+                # Fallback for large font or bold headings
+                is_heading = True
+                reason = "typography_fallback"
         
-        # Determine heading level
+        # Determine heading level - Enhanced logic
         heading_level = "H3"  # Default
         if is_heading:
-            if is_valid_number and level == 1:
-                heading_level = "H1"
-            elif is_valid_number and level == 2:
-                heading_level = "H2"
-            elif is_valid_number and level >= 3:
-                heading_level = "H3"
-            elif row.get('font_size', 12) > 20:
-                heading_level = "H1"
-            elif row.get('font_size', 12) > 15:
-                heading_level = "H2"
+            font_size = row.get('font_size', 12)
+            is_bold = row.get('bold', False)
+            is_all_caps = row.get('is_all_caps', False) or (text.isupper() and bool(re.search(r'[a-zA-Z]', text)))
+            word_count = len(text.split())
+            relative_font_size = row.get('relative_font_size', 1.0)
+            
+            if is_valid_number:
+                # For numbered headings, use the detected level
+                if level == 1:
+                    heading_level = "H1"
+                elif level == 2:
+                    heading_level = "H2"
+                else:
+                    heading_level = "H3"
             else:
-                heading_level = "H3"
+                # For non-numbered headings, use typography and content
+                # H1 criteria: Very large font, or large+bold, or short all-caps
+                if (font_size >= 22 or relative_font_size >= 1.8 or 
+                    (font_size >= 18 and is_bold) or 
+                    (font_size >= 16 and is_bold and is_all_caps) or
+                    (is_all_caps and word_count <= 3 and font_size >= 14)):
+                    heading_level = "H1"
+                # H2 criteria: Large font, or medium+bold, or medium all-caps
+                elif (font_size >= 16 or relative_font_size >= 1.4 or
+                      (font_size >= 14 and is_bold) or 
+                      (is_all_caps and word_count <= 6 and font_size >= 12)):
+                    heading_level = "H2"
+                else:
+                    heading_level = "H3"
         
         if is_heading:
             headings.append({

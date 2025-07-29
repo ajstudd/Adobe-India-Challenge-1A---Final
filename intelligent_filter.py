@@ -113,7 +113,18 @@ class IntelligentFilter:
         
         # Exclusion patterns (common false positives) - Enhanced based on requirements
         self.exclusion_patterns = {
-            # Basic text patterns
+            # NEW RULES: Special character patterns at start (User requested)
+            'starts_with_bad_special_chars': re.compile(r'^\s*[&_,.\\%*!~]'),  # Reject headings starting with &, _, , , ., \, %,*,!, ~
+            'starts_with_dollar_invalid': re.compile(r'^\s*\$(?![a-zA-Z0-9])'),  # $ must be followed by number or letter
+            'too_short_heading': re.compile(r'^\s*.{1,3}\s*$'),  # Heading should be more than 3 characters
+            
+            # Enhanced grammar-based filtering for function words
+            'function_words_extended': re.compile(r'^\s*(for|the|them|their|these|those|this|that|with|from|into|onto|upon|over|under|above|below|beside|between|among|during|before|after|since|until|while|where|when|why|how|what|which|who|whom|whose)\s*$', re.IGNORECASE),
+            'pronouns': re.compile(r'^\s*(i|me|my|mine|myself|you|your|yours|yourself|he|him|his|himself|she|her|hers|herself|it|its|itself|we|us|our|ours|ourselves|they|them|their|theirs|themselves)\s*$', re.IGNORECASE),
+            'articles_prepositions': re.compile(r'^\s*(a|an|the|in|on|at|by|for|with|without|to|from|of|about|under|over|through|during|before|after|above|below|beneath|beside|between|among|against|toward|towards|into|onto|upon|across|along|around|beyond|past|within|throughout|underneath)\s*$', re.IGNORECASE),
+            'conjunctions_adverbs': re.compile(r'^\s*(and|but|or|nor|for|so|yet|however|therefore|thus|hence|moreover|furthermore|additionally|meanwhile|nevertheless|nonetheless|consequently|accordingly|subsequently|previously|initially|finally|eventually|ultimately|particularly|especially|specifically|generally|typically|usually|often|sometimes|rarely|never|always|still|already|just|only|even|also|too|very|quite|rather|fairly|extremely|incredibly|absolutely|completely|entirely|totally|partially|somewhat|slightly|barely|hardly|scarcely)\s*$', re.IGNORECASE),
+            
+            # Basic text patterns  
             'starts_with_lowercase': re.compile(r'^\s*[a-z]'),  # New rule: reject headings starting with lowercase
             
             # URLs and technical references
@@ -179,7 +190,7 @@ class IntelligentFilter:
         self.positive_patterns = {
             'chapter_section': re.compile(r'^\s*(?:chapter|section|part|unit|lesson)\s+\d+', re.IGNORECASE),
             'appendix': re.compile(r'^\s*appendix\s+[a-z]\b', re.IGNORECASE),
-            'common_headings': re.compile(r'^\s*(?:introduction|conclusion|summary|abstract|references|bibliography|acknowledgments?|methodology|results|discussion|analysis|overview|background|objectives?|scope|limitations?|recommendations?|findings)\s*$', re.IGNORECASE),
+            'common_headings': re.compile(r'^\s*(?:Introduction|Conclusion|Summary|Abstract|References|Bibliography|Acknowledgments?|Methodology|Results|Discussion|Analysis|Overview|Background|Objectives?|Scope|Limitations?|Recommendations?|Findings)\s*$'),  # Only properly capitalized
             
             # ENHANCED HIERARCHICAL NUMBERING PATTERNS - Using the new analyzer logic
             # Decimal system patterns (1, 1.1, 1.1.1, etc.)
@@ -204,8 +215,8 @@ class IntelligentFilter:
             'mixed_alpha_num': re.compile(r'^\s*[A-Z]\.\d+(?:\.\w+)*\s*\.?\s*.*$'),
             'mixed_num_alpha': re.compile(r'^\s*\d+\.[A-Z](?:\.\w+)*\s*\.?\s*.*$'),
             
-            # Title case and other patterns
-            'title_case_short': re.compile(r'^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,6}$'),  # Title Case (short)
+            # Title case and other patterns - RESTRICTED to avoid false positives
+            'title_case_short': re.compile(r'^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,4}$'),  # Only multi-word title case (not single words like "These", "The")
             'project_specific': re.compile(r'^\s*(?:abstract|outcomes?|project\s+plan|implementation|project\s+legacy|project\s+resources)\s*$', re.IGNORECASE),  # Document-specific
         }
         
@@ -298,6 +309,7 @@ class IntelligentFilter:
         """
         Apply the specific filtering rules from the requirements - MUCH more lenient
         ENHANCED: Properly preserve legitimate headings (roman numerals, numbered, single-word)
+        NEW: Added user-requested rules for special characters, grammar, and length
         Returns: (should_reject, rejection_reasons)
         """
         text_clean = text.strip()
@@ -305,21 +317,94 @@ class IntelligentFilter:
         char_count = len(text_clean)
         rejection_reasons = []
         
-        # FIRST: Check if this is a legitimate heading pattern using hierarchical analyzer
+        # USER REQUESTED RULE 1: Reject headings starting with bad special characters
+        # (&, _, , , ., \, %,*,!, ~) but allow $ if followed by number/letter
+        if text_clean and text_clean[0] in '&_,.\\%*!~':
+            rejection_reasons.append("starts_with_bad_special_char")
+            logger.debug(f"❌ Rejected for bad special char start: {text_clean}")
+            return True, rejection_reasons  # Immediate rejection
+        
+        # Special handling for $ - must be followed by number or letter
+        if text_clean.startswith('$') and len(text_clean) > 1:
+            if not (text_clean[1].isalnum()):
+                rejection_reasons.append("dollar_not_followed_by_alphanumeric")
+                logger.debug(f"❌ Rejected $ not followed by number/letter: {text_clean}")
+                return True, rejection_reasons  # Immediate rejection
+        
+        # USER REQUESTED RULE 2: Heading should be more than 3 characters
+        if len(text_clean) <= 3:
+            # Exception: Allow legitimate single-character headings (like roman numerals, letters, numbers)
+            if not (re.match(r'^[IVX]+$', text_clean, re.IGNORECASE) or 
+                   re.match(r'^[A-Z]$', text_clean) or
+                   re.match(r'^\d+$', text_clean) or
+                   text_clean.lower() in ['a']):  # Allow single 'a' for section headings
+                rejection_reasons.append("too_short_less_than_4_chars")
+                logger.debug(f"❌ Rejected for being too short: {text_clean}")
+                return True, rejection_reasons  # Immediate rejection
+        
+        # USER REQUESTED RULE 4: Grammar-based filtering for function words
+        # Enhanced list of function words that should NOT be headings
+        function_words = {
+            # Articles
+            'a', 'an', 'the',
+            # Pronouns  
+            'me', 'my', 'mine', 'you', 'your', 'yours', 'he', 'him', 'his', 'she', 'her', 'hers', 
+            'it', 'its', 'we', 'us', 'our', 'ours', 'they', 'them', 'their', 'theirs',
+            # Prepositions
+            'in', 'on', 'at', 'by', 'for', 'with', 'without', 'to', 'from', 'of', 'about', 
+            'under', 'over', 'through', 'during', 'before', 'after', 'above', 'below',
+            'beneath', 'beside', 'between', 'among', 'against', 'toward', 'towards',
+            'into', 'onto', 'upon', 'across', 'along', 'around', 'beyond', 'past',
+            'within', 'throughout', 'underneath',
+            # Conjunctions
+            'and', 'but', 'or', 'nor', 'so', 'yet',
+            # Common adverbs that shouldn't be headings
+            'however', 'therefore', 'thus', 'hence', 'moreover', 'furthermore', 
+            'additionally', 'meanwhile', 'nevertheless', 'nonetheless', 'consequently',
+            'accordingly', 'subsequently', 'previously', 'initially', 'finally',
+            'eventually', 'ultimately', 'particularly', 'especially', 'specifically',
+            'generally', 'typically', 'usually', 'often', 'sometimes', 'rarely',
+            'never', 'always', 'still', 'already', 'just', 'only', 'even', 'also',
+            'too', 'very', 'quite', 'rather', 'fairly', 'extremely', 'incredibly',
+            'absolutely', 'completely', 'entirely', 'totally', 'partially', 
+            'somewhat', 'slightly', 'barely', 'hardly', 'scarcely',
+            # Additional problematic words from current JSON
+            'these', 'other', 'percent'
+        }
+        
+        # Don't include 'i' in function words since it could be roman numeral
+        # Don't include 'a' in function words since it could be a letter heading
+        if word_count == 1 and text_clean.lower() in function_words:
+            # Exception: Don't reject roman numerals or single letters that could be section headings
+            if not (re.match(r'^[IVX]$', text_clean, re.IGNORECASE) or re.match(r'^[A-Z]$', text_clean)):
+                rejection_reasons.append("single_word_function_word")
+                logger.debug(f"❌ Rejected function word: {text_clean}")
+                return True, rejection_reasons  # Immediate rejection
+        
+        # USER REQUESTED RULE 3: Reject headings starting with lowercase
+        # BUT check this AFTER function words and BEFORE checking positive patterns
+        if text_clean and text_clean[0].islower():
+            # Exception: Allow if it's a specific technical term that we want to preserve
+            technical_exceptions = {'iPhone', 'iPad', 'macOS', 'iOS', 'eBay', 'jQuery', 'eBusiness'}
+            if text_clean not in technical_exceptions:
+                rejection_reasons.append("starts_with_lowercase")
+                logger.debug(f"❌ Rejected for lowercase start: {text_clean}")
+                return True, rejection_reasons  # Immediate rejection
+        
+        # AFTER new strict rules, check if this is a legitimate heading pattern using hierarchical analyzer
         if self.numbering_analyzer:
             is_valid_number, number_type, level = self.numbering_analyzer.is_valid_heading_number(text_clean)
             if is_valid_number:
                 logger.debug(f"✅ Preserving hierarchical {number_type} heading (level {level}): {text_clean}")
                 return False, [f"preserved_hierarchical_{number_type}_level_{level}"]
         
-        # SECOND: Check traditional positive patterns
+        # Check traditional positive patterns (but only for uppercase/properly formatted text)
         is_positive_heading, positive_pattern = self.check_positive_patterns(text_clean)
         if is_positive_heading:
-            # This is a legitimate heading pattern - don't apply most filters
             logger.debug(f"✅ Preserving legitimate heading pattern '{positive_pattern}': {text_clean}")
             return False, [f"preserved_positive_pattern_{positive_pattern}"]
         
-        # Check for legitimate single-word headings (common section names)
+        # Check for legitimate single-word headings (common section names) - but only if properly capitalized
         legitimate_single_words = {
             'introduction', 'methodology', 'analysis', 'conclusion', 'conclusions',
             'summary', 'abstract', 'overview', 'background', 'results', 'discussion',
@@ -332,12 +417,13 @@ class IntelligentFilter:
             'future', 'recommendations', 'improvements', 'enhancements', 'extensions'
         }
         
-        if word_count == 1 and text_clean.lower() in legitimate_single_words:
+        # Only allow legitimate single words if they are properly capitalized
+        if word_count == 1 and text_clean.lower() in legitimate_single_words and text_clean[0].isupper():
             logger.debug(f"✅ Preserving legitimate single-word heading: {text_clean}")
             return False, [f"preserved_single_word_heading"]
         
-        # Check for roman numerals (with or without dots)
-        if re.match(r'^\s*[IVX]+\.?\s*$', text_clean, re.IGNORECASE):
+        # Check for roman numerals (with or without dots) - properly capitalized
+        if re.match(r'^\s*[IVX]+\.?\s*$', text_clean, re.IGNORECASE) and text_clean.isupper():
             logger.debug(f"✅ Preserving roman numeral heading: {text_clean}")
             return False, [f"preserved_roman_numeral"]
         
@@ -346,7 +432,7 @@ class IntelligentFilter:
             logger.debug(f"✅ Preserving numbered heading: {text_clean}")
             return False, [f"preserved_numbered_heading"]
         
-        # Rule 1: Only reject obvious sentence-like structures  
+        # EXISTING RULES: Only reject obvious sentence-like structures  
         if text_clean.endswith('.') and word_count > 15:  # Increased from 12
             rejection_reasons.append("long_sentence_with_period")
             
@@ -361,20 +447,6 @@ class IntelligentFilter:
         if any(keyword in text_clean.lower() for keyword in identity_keywords):
             rejection_reasons.append("clear_identity_pattern")
         
-        # Rule 4: Only reject if starts with lowercase (but allow some exceptions)
-        if (text_clean and text_clean[0].islower() and 
-            not any(pattern.search(text_clean) for pattern in self.positive_patterns.values())):
-            rejection_reasons.append("lowercase_start_no_positive_pattern")
-        
-        # Rule 5: Be more lenient with fragments - only reject obvious function words
-        if word_count <= 1:
-            # Check if it's a function word that should be rejected
-            function_words = {'the', 'a', 'an', 'and', 'but', 'or', 'so', 'yet', 'for', 'nor', 
-                            'with', 'by', 'from', 'to', 'in', 'on', 'at', 'of', 'these', 
-                            'initially', 'however', 'therefore', 'thus', 'hence'}
-            if text_clean.lower() in function_words:
-                rejection_reasons.append("function_word")
-        
         # Only check for the most obvious false positives
         obvious_false_positives = [
             "registration :", "lovely professional university",
@@ -384,8 +456,15 @@ class IntelligentFilter:
         if text_clean.lower() in obvious_false_positives:
             rejection_reasons.append("obvious_false_positive")
         
-        # Should reject only if multiple major issues or obvious false positives
-        should_reject = len(rejection_reasons) >= 2 or any("obvious" in reason for reason in rejection_reasons)
+        # Should reject if any of the new strict rules apply OR multiple existing issues
+        new_rule_violations = any(reason in ["starts_with_bad_special_char", "dollar_not_followed_by_alphanumeric", 
+                                           "too_short_less_than_4_chars", "starts_with_lowercase", 
+                                           "single_word_function_word"] for reason in rejection_reasons)
+        
+        should_reject = new_rule_violations or len(rejection_reasons) >= 2 or any("obvious" in reason for reason in rejection_reasons)
+        
+        if should_reject:
+            logger.debug(f"❌ Rejected '{text_clean}' for reasons: {rejection_reasons}")
         
         return should_reject, rejection_reasons
     
@@ -422,7 +501,42 @@ class IntelligentFilter:
         if text_clean.lower() in legitimate_single_words:
             return False, "legitimate_single_word"
         
-        # Now check exclusion patterns
+        # USER REQUESTED RULES: Apply new strict filtering rules
+        # 1. Check for bad special characters at start
+        if text_clean and text_clean[0] in '&_,.\\%*!~':
+            return True, "starts_with_bad_special_char"
+        
+        # 2. Check $ rule - must be followed by alphanumeric
+        if text_clean.startswith('$'):
+            if len(text_clean) <= 1 or not text_clean[1].isalnum():
+                return True, "dollar_not_followed_by_alphanumeric"
+        
+        # 3. Check minimum length (more than 3 characters)
+        if len(text_clean) <= 3:
+            # Exception for legitimate short headings
+            if not (re.match(r'^[IVX]+$', text_clean, re.IGNORECASE) or 
+                   re.match(r'^[A-Z]$', text_clean) or
+                   re.match(r'^\d+$', text_clean)):
+                return True, "too_short_less_than_4_chars"
+        
+        # 4. Check for lowercase start
+        if text_clean and text_clean[0].islower():
+            # Exception for technical terms
+            if not text_clean.lower() in ['iPhone', 'iPad', 'macOS', 'iOS', 'eBay', 'etc']:
+                return True, "starts_with_lowercase"
+        
+        # 5. Check for function words
+        function_words = {
+            'for', 'the', 'them', 'their', 'these', 'those', 'this', 'that',
+            'a', 'an', 'and', 'but', 'or', 'so', 'yet', 'nor', 
+            'with', 'by', 'from', 'to', 'in', 'on', 'at', 'of',
+            'initially', 'however', 'therefore', 'thus', 'hence'
+        }
+        
+        if len(text_clean.split()) == 1 and text_clean.lower() in function_words:
+            return True, "single_word_function_word"
+        
+        # Now check traditional exclusion patterns
         for pattern_name, pattern in self.exclusion_patterns.items():
             if pattern.search(text_clean):
                 return True, pattern_name
