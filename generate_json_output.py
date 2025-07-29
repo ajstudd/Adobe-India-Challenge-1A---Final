@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-JSON Output Generation Script
-============================
+JSON Output Generation Script - Automated
+=========================================
 
 This script handles generating final JSON output for competition submission.
+Runs automatically without user interaction for Docker deployment.
 
 Features:
-✅ Process PDFs from input or unprocessed_pdfs folders
+✅ Process PDFs from input folder automatically
 ✅ Extract blocks and generate heading predictions
 ✅ Create structured JSON output with heading hierarchy
 ✅ Save JSON files to output folder
@@ -14,20 +15,24 @@ Features:
 ✅ Handle multilingual documents
 ✅ Feature compatibility checking
 ✅ Smart model selection - automatically finds latest retrained model
-✅ Display model information during processing
 ✅ Enhanced model management and status reporting
+✅ Fully automated processing for Docker containers
 
 Model Selection:
-- "latest" automatically selects the most recent retrained model
+- Automatically selects the most recent retrained model
 - Prioritizes retrained models over original trained models
-- Shows model version, file path, and creation time
-- Lists available models for easy selection
+- Shows model version, file path, and creation time during processing
 
 Usage:
     python generate_json_output.py
 
+Docker Usage:
+    The script is designed to run automatically in Docker containers.
+    It will process all PDFs in the /app/input directory and output
+    JSON files to the /app/output directory.
+
 Author: AI Assistant
-Date: July 28, 2025 (Enhanced with smart model selection)
+Date: July 29, 2025 (Enhanced for automated Docker deployment)
 """
 
 import os
@@ -1347,126 +1352,58 @@ class JSONOutputGenerator:
             if len(model_files) > 5:
                 print(f"      ... and {len(model_files)-5} more models")
     
-    def interactive_menu(self):
-        """Interactive menu for JSON generation operations"""
-        while True:
-            print("\n" + "="*60)
-            print("📤 JSON OUTPUT GENERATION SCRIPT")
-            print("="*60)
-            print("1. 📤 Load model")
-            print("2. 📥 Generate JSON from input PDFs")
-            print("3. 📄 Generate JSON from unprocessed PDFs")
-            print("4. 📊 Show status")
-            print("5. 🧹 Clean output directory")
-            print("6. ❌ Exit")
-            print()
-            
-            choice = input("Choose an option (1-6): ").strip()
-            
-            if choice == '1':
-                # Show available models first
-                model_files = glob.glob(os.path.join(self.models_dir, "heading_model_*.pkl"))
-                if model_files:
-                    print("\n📋 Available models:")
-                    model_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
-                    for i, model_file in enumerate(model_files[:10]):  # Show top 10
-                        filename = os.path.basename(model_file)
-                        version = filename.replace("heading_model_", "").replace(".pkl", "")
-                        mod_time = datetime.fromtimestamp(os.path.getmtime(model_file))
-                        
-                        # Highlight retrained models
-                        prefix = "🔄" if "retrained" in version else "🤖"
-                        print(f"   {i+1}. {prefix} {version} ({mod_time.strftime('%Y-%m-%d %H:%M')})")
-                    
-                    if len(model_files) > 10:
-                        print(f"   ... and {len(model_files)-10} more models")
-                else:
-                    print("\n⚠️  No models found in models directory!")
-                
-                print("\n💡 Options:")
-                print("   - Type 'latest' (recommended) - automatically selects most recent retrained model")
-                print("   - Type specific version name (e.g., 'retrained_cycle_2_20250728_103027')")
-                print("   - Press Enter for 'latest'")
-                
-                version = input("\nModel version: ").strip()
-                if not version:
-                    version = "latest"
-                
-                if self.load_model(version):
-                    print("✅ Model loaded successfully!")
-                    if self.check_feature_compatibility():
-                        print("✅ Feature compatibility check passed!")
-                    else:
-                        print("❌ Feature compatibility check failed!")
-                else:
-                    print("❌ Failed to load model!")
-            
-            elif choice == '2':
-                if self.model is None:
-                    print("❌ No model loaded. Please load a model first.")
-                    continue
-                
-                success = self.generate_json_output("input")
-                if success:
-                    print("✅ JSON generation completed successfully!")
-                else:
-                    print("❌ JSON generation failed!")
-            
-            elif choice == '3':
-                if self.model is None:
-                    print("❌ No model loaded. Please load a model first.")
-                    continue
-                
-                success = self.generate_json_output("unprocessed")
-                if success:
-                    print("✅ JSON generation completed successfully!")
-                else:
-                    print("❌ JSON generation failed!")
-            
-            elif choice == '4':
-                self.show_status()
-            
-            elif choice == '5':
-                confirm = input("Delete all JSON output files? (y/N): ").strip().lower()
-                if confirm == 'y':
-                    import shutil
-                    if os.path.exists(self.output_dir):
-                        shutil.rmtree(self.output_dir)
-                        os.makedirs(self.output_dir)
-                        print("✅ Cleaned output directory")
-                else:
-                    print("❌ Cleanup cancelled")
-            
-            elif choice == '6':
-                print("👋 Goodbye!")
-                break
-            
-            else:
-                print("❌ Invalid choice. Please try again.")
-
-
+    
 def main():
-    """Main function"""
+    """Main function - Automated processing"""
     print("📤 JSON OUTPUT GENERATION SCRIPT")
     print("=" * 50)
     print("🎯 Features:")
-    print("   ✅ Process PDFs from input or unprocessed folders")
+    print("   ✅ Process PDFs from input folder")
     print("   ✅ Extract blocks and generate heading predictions")
     print("   ✅ Create structured JSON output with hierarchy")
     print("   ✅ Save JSON files to output folder")
     print("   ✅ Validate JSON schema compliance")
     print("   ✅ Handle multilingual documents")
     print("   ✅ Feature compatibility checking")
+    print("   ✅ Automatic model loading and processing")
     print()
     
     try:
+        # Initialize generator
         generator = JSONOutputGenerator()
-        generator.interactive_menu()
+        
+        # Automatically load the latest model
+        logger.info("🤖 Loading the latest model...")
+        if not generator.load_model("latest"):
+            logger.error("❌ Failed to load model!")
+            return False
+        
+        logger.info("✅ Model loaded successfully!")
+        
+        # Check feature compatibility
+        if not generator.check_feature_compatibility():
+            logger.error("❌ Feature compatibility check failed!")
+            return False
+        
+        logger.info("✅ Feature compatibility check passed!")
+        
+        # Automatically process PDFs from input folder
+        logger.info("📄 Starting automatic processing of input PDFs...")
+        success = generator.generate_json_output("input")
+        
+        if success:
+            logger.info("✅ JSON generation completed successfully!")
+            return True
+        else:
+            logger.error("❌ JSON generation failed!")
+            return False
+            
     except KeyboardInterrupt:
         print("\n👋 Generation interrupted by user")
+        return False
     except Exception as e:
         logger.error(f"❌ Generation error: {e}")
-        raise
+        return False
 
 
 if __name__ == "__main__":
