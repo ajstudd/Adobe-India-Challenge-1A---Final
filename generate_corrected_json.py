@@ -27,7 +27,7 @@ except ImportError:
 sys.path.append('.')
 
 def extract_pdf_blocks(pdf_path):
-    """Extract blocks from PDF using PyMuPDF (adapted from extract_local_dataset_to_csv.py)"""
+    """Extract blocks from PDF using PyMuPDF with OCR fallback for garbage text"""
     print(f"📄 Extracting blocks from {os.path.basename(pdf_path)}...")
     
     doc = fitz.open(pdf_path)
@@ -61,7 +61,9 @@ def extract_pdf_blocks(pdf_path):
         found_block = False
         prev_y1 = None
         prev_heading_idx = None
+        page_blocks = []  # Store blocks for this page
         
+        # First pass: extract using programmatic method
         for b in page_dict.get("blocks", []):
             if "lines" not in b:
                 continue
@@ -136,7 +138,7 @@ def extract_pdf_blocks(pdf_path):
                                                     line_text.strip().startswith("http") or "www." in line_text or ".com" in line_text):
                             heading_level = font_size_to_level[font_size]
                     
-                    blocks.append({
+                    page_blocks.append({
                         "text": line_text,
                         "font_size": font_size,
                         "page": page_num + 1,  # 1-based page numbering
@@ -165,9 +167,39 @@ def extract_pdf_blocks(pdf_path):
                         "distance_to_previous_heading": distance_to_previous_heading,
                         "line_spacing_above": line_spacing_above,
                         "is_heading": 0,  # Prefill with 0 for all rows
-                        "heading_level": heading_level  # 0=normal, 1=largest, 2=second, 3=third, 4=fourth
+                        "heading_level": heading_level,  # 0=normal, 1=largest, 2=second, 3=third, 4=fourth
+                        "extraction_method": "programmatic"
                     })
                     prev_y1 = y1
+        
+        # Check if this page has too much garbage text - if so, use OCR fallback
+        garbage_count = 0
+        total_text_blocks = len(page_blocks)
+        
+        for block in page_blocks:
+            if not is_valid_heading_text(block["text"]) and len(block["text"]) > 5:
+                garbage_count += 1
+        
+        garbage_ratio = garbage_count / total_text_blocks if total_text_blocks > 0 else 0
+        
+        # If more than 40% of text blocks are garbage, use OCR for this page
+        if garbage_ratio > 0.4 and OCR_AVAILABLE:
+            print(f"⚠️  Page {page_num + 1}: {garbage_ratio:.1%} garbage text detected, switching to OCR...")
+            ocr_blocks = extract_page_with_ocr(page, page_num + 1, page_height, font_size_to_level, median_font_size)
+            
+            # Use OCR blocks instead of programmatic extraction for this page
+            if ocr_blocks:
+                blocks.extend(ocr_blocks)
+                print(f"✅ Page {page_num + 1}: Used OCR, extracted {len(ocr_blocks)} blocks")
+            else:
+                # Fallback to programmatic extraction even if it's garbage
+                blocks.extend(page_blocks)
+                print(f"⚠️  Page {page_num + 1}: OCR failed, using programmatic extraction")
+        else:
+            # Use programmatic extraction
+            blocks.extend(page_blocks)
+            if garbage_ratio > 0:
+                print(f"📝 Page {page_num + 1}: {garbage_ratio:.1%} garbage text, but below threshold")
     
     doc.close()
     
@@ -178,6 +210,98 @@ def extract_pdf_blocks(pdf_path):
     else:
         print("❌ No blocks extracted from PDF")
         return None
+
+def extract_page_with_ocr(page, page_num, page_height, font_size_to_level, median_font_size):
+    """Extract text from a page using OCR as fallback"""
+    if not OCR_AVAILABLE:
+        return []
+    
+    try:
+        import cv2
+        import pytesseract
+        from PIL import Image
+        
+        # Convert page to image
+        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x scale for better OCR
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        img_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+        
+        # Extract text with bounding boxes using OCR
+        ocr_data = pytesseract.image_to_data(img_cv, output_type=pytesseract.Output.DICT, lang="eng")
+        
+        blocks = []
+        current_line = ""
+        current_bbox = None
+        current_conf = 0
+        
+        for i in range(len(ocr_data['text'])):
+            text = ocr_data['text'][i].strip()
+            conf = int(ocr_data['conf'][i])
+            
+            if text and conf > 30:  # Only use text with reasonable confidence
+                # Clean the OCR text
+                text = re.sub(r'[\u0000-\u0008\u000B-\u001F\u007F-\u009F]', '', text)
+                text = text.strip()
+                
+                if text and is_valid_heading_text(text):
+                    x, y, w, h = ocr_data['left'][i], ocr_data['top'][i], ocr_data['width'][i], ocr_data['height'][i]
+                    
+                    # Scale coordinates back (we used 2x scaling)
+                    x, y, w, h = x/2, y/2, w/2, h/2
+                    
+                    # Estimate font size from height
+                    font_size = max(8, h * 0.75)  # Rough estimation
+                    
+                    # Determine heading level
+                    heading_level = 0
+                    if font_size > 20:
+                        heading_level = 1
+                    elif font_size > 16:
+                        heading_level = 2
+                    elif font_size > 14:
+                        heading_level = 3
+                    elif font_size > 12:
+                        heading_level = 4
+                    
+                    blocks.append({
+                        "text": text,
+                        "font_size": font_size,
+                        "page": page_num,
+                        "x0": x,
+                        "y0": y,
+                        "x1": x + w,
+                        "y1": y + h,
+                        "font": None,
+                        "bold": False,
+                        "italic": False,
+                        "underline": False,
+                        "color": None,
+                        "bullet": text.startswith(("•", "-", "‣", "*")),
+                        "math": any(sym in text for sym in ["=", "+", "-", "×", "÷", "∑", "∫", "√", "π", "∞"]),
+                        "hyperlink": text.startswith("http") or "www." in text or ".com" in text,
+                        "is_all_caps": int(text.isupper()),
+                        "is_title_case": int(text.istitle()),
+                        "ends_with_colon": int(text.endswith(":")),
+                        "starts_with_number": int(bool(text and text.split()[0][0].isdigit() if text.split() else False)),
+                        "punctuation_count": sum(1 for c in text if c in '.,;:!?-—()[]{}"\''),
+                        "contains_colon": int(':' in text),
+                        "contains_semicolon": int(';' in text),
+                        "word_count": len(text.split()),
+                        "line_position_on_page": y / page_height if page_height else 0,
+                        "relative_font_size": font_size / median_font_size if median_font_size else 1.0,
+                        "distance_to_previous_heading": None,
+                        "line_spacing_above": None,
+                        "is_heading": 0,
+                        "heading_level": heading_level,
+                        "extraction_method": "ocr",
+                        "ocr_confidence": conf
+                    })
+        
+        return blocks
+        
+    except Exception as e:
+        print(f"❌ OCR failed for page {page_num}: {e}")
+        return []
 
 def is_valid_heading_text(text):
     """Check if text is valid for heading detection (filter out garbage/corrupted text)"""
@@ -230,8 +354,28 @@ def is_valid_heading_text(text):
         return False
     
     # Check for excessive special characters
-    special_chars = re.findall(r'[#@$%^&*!]', text)
+    special_chars = re.findall(r'[#@$%^&*!?()]', text)
     if len(special_chars) > len(text) * 0.4:  # More than 40% special chars
+        return False
+    
+    # Check for OCR corruption indicators
+    corruption_indicators = [
+        '%' in text and len(text) > 20,  # Percent signs in long text (often OCR corruption)
+        '?' in text and text.count('?') > 1,  # Multiple question marks
+        ')/' in text,  # Patterns like ")/-"
+        '/--' in text,  # Patterns like "/--6"
+        'CXag' in text,  # Specific OCR corruption
+        'WXW' in text,   # More specific OCR corruption
+        'TfT' in text,   # More specific OCR corruption  
+        'YXe' in text,   # More specific OCR corruption
+        'bY' in text and len(text) > 15,  # Common OCR misread in long text
+        'XaW' in text,   # More OCR corruption
+        'Wg' in text and len(text) > 10,  # OCR corruption pattern
+        re.search(r'[A-Z][a-z]{1,2}[A-Z][a-z]{1,2}[A-Z]', text),  # Mixed case OCR pattern
+        re.search(r'\d[A-Z][a-z]{2,}[A-Z]', text),  # Number + mixed case
+    ]
+    
+    if any(corruption_indicators):
         return False
     
     # For very short text, require at least one real word (not just numbers/symbols)
@@ -254,10 +398,24 @@ def is_valid_heading_text(text):
         r'[#!@$%^&*]{3,}',  # Multiple special characters in a row
         r'^[A-Z][a-z]*[A-Z][a-z]*[A-Z][a-z]*[A-Z]',  # Weird mixed case patterns
         r'^[FN\[\]Q]{4,}',  # Common OCR misreads
+        
+        # Enhanced patterns for the specific corruption you're seeing
+        r'^[A-Z][a-z]*[A-Z][a-z]*%[A-Z]',  # Patterns like "9ZeXX CXag%TfT"
+        r'[A-Z][a-z]{2,}[A-Z][a-z]{2,}[A-Z]',  # Mixed case like "CXag" "WXWXk"
+        r'[A-Z]{2,}[a-z]{2,}[A-Z]{2,}',  # Another mixed case pattern
+        r'^[A-Z\d][a-z]{2,}[A-Z][a-z]{1,3}[A-Z][a-z]{1,3}',  # Patterns like "9ZeXX"
+        r'[?][a-z]{1,3}[A-Z][a-z]{1,3}',  # Question marks with mixed case
+        r'%[A-Z][a-z]*[A-Z]',  # Percent signs with mixed case
+        r'[)]/[-]{2,}[A-Z]',  # Patterns like ")/-/1)"
+        r'[A-Z][a-z]{1,2}[A-Z][a-z]{1,2}[A-Z][a-z]{1,2}[A-Z]',  # Long mixed case sequences
+        r'^[A-Z\d][a-z]{3,}[A-Z][a-z]{3,}[A-Z]',  # Specific OCR corruption pattern
+        r'[A-Z][a-z]*![a-z]*[A-Z]',  # Exclamation marks in weird places
+        r'[A-Z]{1,2}[a-z]{1,3}[A-Z]{1,2}[a-z]{1,3}[?!%]',  # Special chars at end of mixed case
+        r'^[0-9][A-Z][a-z]{2,}[A-Z].*[A-Z][a-z]{2,}[0-9)]',  # Number + mixed case + number/paren
     ]
     
     for pattern in ocr_corruption_patterns:
-        if re.match(pattern, text):
+        if re.search(pattern, text):  # Changed from match to search to catch patterns anywhere
             return False
     
     return True
@@ -419,9 +577,12 @@ def process_single_pdf(pdf_path, output_dir):
     
     print(f"\n📊 FOUND {len(headings)} HEADINGS")
     
+    # Extract document title: first H1 heading within initial 100 blocks
+    document_title = extract_document_title(headings, pdf_name)
+    
     # Generate JSON structure following output_schema.json
     json_output = {
-        "title": generate_title_from_pdf_name(pdf_name),
+        "title": document_title,
         "outline": []
     }
     
@@ -439,6 +600,27 @@ def process_single_pdf(pdf_path, output_dir):
     
     print(f"✅ JSON SAVED: {output_path}")
     return True
+
+def extract_document_title(headings, pdf_name):
+    """Extract document title: first H1 heading within initial 100 blocks (by position)"""
+    # Rule: The first H1 heading within the initial 100 blocks is the document title
+    
+    # Sort headings by page and position to find the first one
+    sorted_headings = sorted(headings, key=lambda h: (h.get('page', 1), headings.index(h)))
+    
+    # Find the first H1 heading within the first 100 blocks
+    for i, heading in enumerate(sorted_headings):
+        if i >= 100:  # Only check within initial 100 blocks
+            break
+            
+        if heading.get('level') == 'H1' and heading.get('text', '').strip():
+            title = heading['text'].strip()
+            print(f"📖 DOCUMENT TITLE EXTRACTED: '{title}' (from first H1 in initial 100 blocks)")
+            return title
+    
+    # Fallback: if no H1 found in first 100 blocks, use PDF filename
+    print(f"📖 NO H1 TITLE FOUND in first 100 blocks, using PDF filename")
+    return generate_title_from_pdf_name(pdf_name)
 
 def generate_title_from_pdf_name(pdf_name):
     """Generate a proper title from PDF filename"""

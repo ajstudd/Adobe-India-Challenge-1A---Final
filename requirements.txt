@@ -10,3 +10,7 @@ matplotlib==3.10.0
 spacy==3.8.7
 langdetect==1.0.9
 subprocess32>=3.5.4; python_version < "3.0"
+# OCR dependencies
+opencv-python==4.10.0.84
+pytesseract==0.3.13
+Pillow==10.4.0
